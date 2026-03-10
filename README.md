@@ -17,36 +17,75 @@ High-level architecture of the platform:
 
 
 ```mermaid
-flowchart LR
-    U["User"] --> FE["Next.js Frontend"]
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial', 'lineColor': '#94a3b8', 'primaryColor': '#1e293b', 'primaryTextColor': '#f8fafc', 'primaryBorderColor': '#475569', 'secondaryColor': '#0f172a', 'tertiaryColor': '#1e293b', 'nodeTextSize': '18px'}, 'flowchart': {'curve': 'basis', 'padding': 20, 'nodeSpacing': 30, 'rankSpacing': 50, 'htmlLabels': true, 'wrappingWidth': 200}}}%%
 
-    subgraph Frontend
-        FE --> CAT["Category & Home Pages"]
-        CAT --> ART["Article View Page"]
-        ART --> COMP["Companion Panel"]
-        COMP --> STT["Web Speech API - STT"]
-        COMP --> TXT["Text Input"]
-        STT --> WS_CLIENT["WebSocket Client"]
+flowchart TB
+    U["🧑 User"]:::userStyle --> FE["🌐 Next.js Frontend"]:::feStyle
+
+    subgraph Frontend["🖥️ FRONTEND — Next.js"]
+        direction TB
+        FE --> CAT["📂 Category & Home Pages"]:::feNode
+        CAT --> ART["📰 Article View Page"]:::feNode
+        ART --> COMP["💬 Companion Panel"]:::compStyle
+
+        subgraph InputLayer["🎤 Input Layer"]
+            direction LR
+            STT["🎙️ Web Speech API — STT"]:::inputNode
+            TXT["⌨️ Text Input"]:::inputNode
+        end
+
+        COMP --> STT
+        COMP --> TXT
+
+        STT --> WS_CLIENT["🔌 WebSocket Client"]:::wsStyle
         TXT --> WS_CLIENT
-        COMP --> AUDIO["Web Audio API - Playback + Lip Sync"]
-        AUDIO --> COMP
+
+        COMP <-->|"audio stream"| AUDIO["🔈 Web Audio API — Playback + Lip Sync"]:::audioNode
     end
 
-    WS_CLIENT --> WS_API["WS /ws/chat/{article_id}"]
+    WS_CLIENT ==>|"WebSocket Connection"| WS_API
 
-    subgraph Backend["FastAPI Backend"]
-        WS_API --> CTX["Context Builder + RAG"]
-        CTX --> NEWS["News Aggregator"]
-        CTX --> VEC["FAISS Vector Store"]
-        CTX --> AGENT["Reporter Agent"]
-        AGENT --> LLM["Groq Llama 3.3 70B"]
-        LLM --> AGENT
-        AGENT --> RESP["Grounded Answer Text"]
-        RESP --> TTS_API["POST /api/tts/synthesize"]
-        TTS_API --> TTS["Groq TTS + Edge TTS"]
+    subgraph Backend["⚙️ BACKEND — FastAPI"]
+        direction TB
+        WS_API["⚡ WS /ws/chat/{article_id}"]:::apiStyle --> CTX["🔍 Context Builder + RAG"]:::beNode
+
+        subgraph DataSources["📚 Data Sources"]
+            direction LR
+            NEWS["📡 News Aggregator"]:::dataNode
+            VEC["🗄️ FAISS Vector Store"]:::dataNode
+        end
+
+        CTX --> NEWS
+        CTX --> VEC
+        CTX --> AGENT["🤖 Reporter Agent"]:::agentStyle
+
+        AGENT <-->|"inference"| LLM["🧠 Groq Llama 3.3 70B"]:::llmStyle
+
+        AGENT --> RESP["📝 Grounded Answer Text"]:::beNode
+        RESP --> TTS_API["📡 POST /api/tts/synthesize"]:::apiStyle
+        TTS_API --> TTS["🗣️ Groq TTS + Edge TTS"]:::ttsStyle
     end
 
-    TTS --> AUDIO
+    TTS ==>|"audio response"| AUDIO
+
+    classDef userStyle fill:#6366f1,stroke:#818cf8,stroke-width:3px,color:#fff,font-size:18px,font-weight:bold
+    classDef feStyle fill:#0ea5e9,stroke:#38bdf8,stroke-width:3px,color:#fff,font-size:18px,font-weight:bold
+    classDef feNode fill:#0284c7,stroke:#38bdf8,stroke-width:2px,color:#fff,font-size:16px
+    classDef compStyle fill:#0369a1,stroke:#38bdf8,stroke-width:3px,color:#fff,font-size:16px,font-weight:bold
+    classDef inputNode fill:#7dd3fc,stroke:#0ea5e9,stroke-width:2px,color:#0c4a6e,font-size:16px
+    classDef wsStyle fill:#1e40af,stroke:#3b82f6,stroke-width:3px,color:#fff,font-size:16px,font-weight:bold
+    classDef audioNode fill:#7dd3fc,stroke:#0ea5e9,stroke-width:2px,color:#0c4a6e,font-size:16px
+    classDef apiStyle fill:#ea580c,stroke:#fb923c,stroke-width:3px,color:#fff,font-size:16px,font-weight:bold
+    classDef beNode fill:#f97316,stroke:#fdba74,stroke-width:2px,color:#fff,font-size:16px
+    classDef dataNode fill:#fdba74,stroke:#f97316,stroke-width:2px,color:#7c2d12,font-size:16px
+    classDef agentStyle fill:#dc2626,stroke:#f87171,stroke-width:3px,color:#fff,font-size:16px,font-weight:bold
+    classDef llmStyle fill:#9333ea,stroke:#c084fc,stroke-width:3px,color:#fff,font-size:16px,font-weight:bold
+    classDef ttsStyle fill:#c2410c,stroke:#fb923c,stroke-width:3px,color:#fff,font-size:16px,font-weight:bold
+
+    style Frontend fill:#0f172a,stroke:#0ea5e9,stroke-width:2px,stroke-dasharray:8 4,color:#38bdf8,font-size:18px
+    style Backend fill:#0f172a,stroke:#f97316,stroke-width:2px,stroke-dasharray:8 4,color:#fb923c,font-size:18px
+    style InputLayer fill:transparent,stroke:#38bdf8,stroke-width:1px,stroke-dasharray:5 3,color:#38bdf8,font-size:15px
+    style DataSources fill:transparent,stroke:#fb923c,stroke-width:1px,stroke-dasharray:5 3,color:#fb923c,font-size:15px
 ```
 
 ## UI Preview
