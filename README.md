@@ -17,28 +17,31 @@ High-level architecture of the platform:
 
 ```mermaid
 flowchart LR
-    subgraph Client[Frontend – Next.js 14]
-        A[News Category & Feed Pages]
-        B[Article View Page]
-        C[AI Companion Panel<br/>Animated Avatar + Chat UI]
-        D[Voice Input<br/>(Web Speech API)]
-        E[Audio Playback & Lip Sync<br/>(Web Audio API)]
+    subgraph Client["Frontend — Next.js 14"]
+        A["News Category & Feed Pages"]
+        B["Article View Page"]
+        C["AI Companion Panel<br/>Animated Avatar + Chat UI"]
+        D["Voice Input<br/>(Web Speech API)"]
+        E["Audio Playback & Lip Sync<br/>(Web Audio API)"]
     end
 
-    subgraph Backend[Backend – FastAPI]
-        F[News Aggregator Service<br/>(RSS + APIs + Scrapers)]
-        G[Vector Store (FAISS)]
-        H[Context Builder & RAG Orchestrator]
-        I[Reporter Agent<br/>(LangChain / LangGraph)]
-        J[Groq LLM<br/>Llama 3.3 70B]
-        K[TTS Service<br/>Groq TTS + Edge TTS fallback]
-        L[WebSocket Chat Router]
-        M[REST APIs<br/>(/api/news, /api/tts, etc.)]
+    subgraph Backend["Backend — FastAPI"]
+        F["News Aggregator Service<br/>(RSS + APIs + Scrapers)"]
+        G["Vector Store (FAISS)"]
+        H["Context Builder & RAG Orchestrator"]
+        I["Reporter Agent<br/>(LangChain / LangGraph)"]
+        J["Groq LLM<br/>Llama 3.3 70B"]
+        K["TTS Service<br/>Groq TTS + Edge TTS fallback"]
+        L["WebSocket Chat Router"]
+        M["REST APIs<br/>(/api/news, /api/tts, etc.)"]
     end
 
-    A <--> M
-    B <--> M
-    C <--> L
+    A --> M
+    M --> A
+    B --> M
+    M --> B
+    C --> L
+    L --> C
     D --> L
     E <-- K
 
