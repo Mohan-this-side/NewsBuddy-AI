@@ -15,44 +15,38 @@ An intelligent news platform that aggregates real-time news and enables users to
 
 High-level architecture of the platform:
 
+
 ```mermaid
 flowchart LR
-    subgraph Client["Frontend — Next.js 14"]
-        A["News Category & Feed Pages"]
-        B["Article View Page"]
-        C["AI Companion Panel<br/>Animated Avatar + Chat UI"]
-        D["Voice Input<br/>(Web Speech API)"]
-        E["Audio Playback & Lip Sync<br/>(Web Audio API)"]
+    U["User"] --> FE["Next.js Frontend"]
+
+    subgraph Frontend
+        FE --> CAT["Category & Home Pages"]
+        CAT --> ART["Article View Page"]
+        ART --> COMP["Companion Panel"]
+        COMP --> STT["Web Speech API - STT"]
+        COMP --> TXT["Text Input"]
+        STT --> WS_CLIENT["WebSocket Client"]
+        TXT --> WS_CLIENT
+        COMP --> AUDIO["Web Audio API - Playback + Lip Sync"]
+        AUDIO --> COMP
     end
 
-    subgraph Backend["Backend — FastAPI"]
-        F["News Aggregator Service<br/>(RSS + APIs + Scrapers)"]
-        G["Vector Store (FAISS)"]
-        H["Context Builder & RAG Orchestrator"]
-        I["Reporter Agent<br/>(LangChain / LangGraph)"]
-        J["Groq LLM<br/>Llama 3.3 70B"]
-        K["TTS Service<br/>Groq TTS + Edge TTS fallback"]
-        L["WebSocket Chat Router"]
-        M["REST APIs<br/>(/api/news, /api/tts, etc.)"]
+    WS_CLIENT --> WS_API["WS /ws/chat/{article_id}"]
+
+    subgraph Backend["FastAPI Backend"]
+        WS_API --> CTX["Context Builder + RAG"]
+        CTX --> NEWS["News Aggregator"]
+        CTX --> VEC["FAISS Vector Store"]
+        CTX --> AGENT["Reporter Agent"]
+        AGENT --> LLM["Groq Llama 3.3 70B"]
+        LLM --> AGENT
+        AGENT --> RESP["Grounded Answer Text"]
+        RESP --> TTS_API["POST /api/tts/synthesize"]
+        TTS_API --> TTS["Groq TTS + Edge TTS"]
     end
 
-    A --> M
-    M --> A
-    B --> M
-    M --> B
-    C --> L
-    L --> C
-    D --> L
-    E <-- K
-
-    M --> F
-    F --> G
-    L --> H
-    H --> G
-    H --> I
-    I --> J
-    J --> I
-    I --> K
+    TTS --> AUDIO
 ```
 
 ## UI Preview
