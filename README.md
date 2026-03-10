@@ -1,36 +1,78 @@
 # AI News Reporter
 
-An intelligent news platform that aggregates real-time news and enables users to have interactive voice conversations with an AI-powered news companion. Built with FastAPI, Next.js, LangChain, and Groq.
+An intelligent news platform that aggregates real-time news and enables users to have interactive voice conversations with an AI-powered news companion. The system combines multi-source news aggregation, a multi-agent RAG backend, and a futuristic animated AI reporter that talks users through each article.
 
 ## Features
 
-- 📰 **Multi-Source News Aggregation**: Fetches news from Google News RSS, Hacker News, and GNews API
-- 🤖 **AI-Powered Companion**: Interactive animated avatar that explains news articles conversationally
-- 🎤 **Voice Interaction**: Browser-native speech recognition and text-to-speech synthesis
-- 💬 **Real-Time Chat**: WebSocket-based chat with article-grounded responses using RAG
-- 🎨 **Modern UI**: Beautiful, responsive design with dark theme
-- ⚡ **Low Latency**: Optimized for sub-3-second response times
+- 📰 **Multi-Source News Aggregation**: Fetches news from Google News RSS, Hacker News, and GNews API, with graceful fallbacks and caching.
+- 🤖 **AI-Powered Companion**: Animated reporter avatar that summarizes articles, adds context, and answers follow-up questions conversationally.
+- 🎤 **Voice Interaction**: Browser-native speech recognition plus neural text-to-speech for hands-free news consumption.
+- 💬 **Real-Time Chat**: WebSocket-based, article-grounded conversation powered by a multi-agent RAG pipeline.
+- 🎨 **Futuristic UI**: Glassmorphism, gradients, smooth transitions, and an immersive two-panel layout (article on the left, AI reporter on the right).
+- ⚡ **Low Latency**: End-to-end voice-to-voice target under 3 seconds, with an explicit latency budget across each component.
 
-## Architecture
+## System Architecture
 
+High-level architecture of the platform:
+
+```mermaid
+flowchart LR
+    subgraph Client[Frontend – Next.js 14]
+        A[News Category & Feed Pages]
+        B[Article View Page]
+        C[AI Companion Panel<br/>Animated Avatar + Chat UI]
+        D[Voice Input<br/>(Web Speech API)]
+        E[Audio Playback & Lip Sync<br/>(Web Audio API)]
+    end
+
+    subgraph Backend[Backend – FastAPI]
+        F[News Aggregator Service<br/>(RSS + APIs + Scrapers)]
+        G[Vector Store (FAISS)]
+        H[Context Builder & RAG Orchestrator]
+        I[Reporter Agent<br/>(LangChain / LangGraph)]
+        J[Groq LLM<br/>Llama 3.3 70B]
+        K[TTS Service<br/>Groq TTS + Edge TTS fallback]
+        L[WebSocket Chat Router]
+        M[REST APIs<br/>(/api/news, /api/tts, etc.)]
+    end
+
+    A <--> M
+    B <--> M
+    C <--> L
+    D --> L
+    E <-- K
+
+    M --> F
+    F --> G
+    L --> H
+    H --> G
+    H --> I
+    I --> J
+    J --> I
+    I --> K
 ```
-Frontend (Next.js)          Backend (FastAPI)
-├── News Browsing UI    ←→   ├── News Aggregation Service
-├── Article View        ←→   ├── RAG Pipeline (FAISS)
-├── Animated Avatar     ←→   ├── Multi-Agent System (LangGraph)
-├── Voice Input         ←→   ├── Groq LLM (Llama 3.3 70B)
-└── Audio Playback      ←→   └── Edge TTS Service
-```
+
+## UI Preview
+
+These screenshots show the two primary user-facing interfaces of the system.
+
+### Landing / First Interface
+
+![First Interface – News Landing](frontend/Frontend_images/First_interface.png)
+
+### Article + AI Agent Interface
+
+![AI Agent Interface – Article with Animated Reporter](frontend/Frontend_images/Agent_interface.png)
 
 ## Tech Stack
 
 ### Backend
 - **FastAPI**: Async web framework
 - **LangChain + LangGraph**: Multi-agent orchestration
-- **Groq API**: Ultra-fast LLM inference (~200ms)
+- **Groq API**: Ultra-fast LLM inference (~200–500 ms typical)
 - **FAISS**: Vector similarity search
 - **sentence-transformers**: Local embeddings
-- **Edge TTS**: Neural text-to-speech
+- **Groq TTS + Edge TTS**: Neural text-to-speech with automatic fallback
 - **newspaper3k**: Article content extraction
 
 ### Frontend
@@ -163,12 +205,28 @@ Project ANC/
 
 ### TTS API
 - `POST /api/tts/synthesize` - Synthesize speech from text
+ 
+## Latency Budget & Performance Targets
 
-## Performance Targets
+The system was designed with an explicit latency budget to keep the end-to-end voice conversation experience smooth and responsive.
 
-- **End-to-end latency**: < 3 seconds (voice input → voice output)
-- **News cache TTL**: 15 minutes
-- **FAISS index cache**: LRU cache, max 100 articles
+### Latency Budget (Planning Targets)
+
+| Stage                                      | Target Latency        | Notes |
+|-------------------------------------------|-----------------------|-------|
+| Microphone capture + browser STT (Web Speech API) | **300–700 ms**        | Depends on utterance length and browser; runs fully on the client. |
+| WebSocket transport (client → backend)    | **\<100 ms**          | Local development and typical broadband conditions. |
+| Retrieval + RAG context building          | **200–500 ms**        | FAISS similarity search + chunk selection and formatting. |
+| Groq LLM generation (Llama 3.3 70B)       | **200–500 ms**        | Using Groq’s low-latency inference. |
+| TTS synthesis (Groq TTS / Edge TTS)       | **400–800 ms**        | Includes text cleaning, API call, and audio bytes transfer. |
+| Audio decoding + playback start           | **\<200 ms**          | Web Audio API setup and buffer scheduling. |
+| **End-to-end voice → voice**              | **\<3 seconds total** | Sum of the above under normal conditions. |
+
+### Runtime Performance Targets
+
+- **End-to-end latency** (voice input → voice output): **\< 3 seconds**
+- **News cache TTL**: **15 minutes** (to stay fresh without over-hitting free APIs)
+- **FAISS index cache**: **LRU cache, max 100 articles** (recently viewed articles kept hot in memory)
 
 ## Limitations & Future Improvements
 
@@ -186,7 +244,10 @@ Project ANC/
 
 ## License
 
-This project is for educational purposes (CS5100 Foundation of AI course).
+This project is proprietary and is offered under the **MIT License**.  
+Copyright (c) 2025 **Mohan Bhosale**. All rights reserved.
+
+See [LICENSE](LICENSE) for the full license text.
 
 ## Authors
 
