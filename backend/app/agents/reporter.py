@@ -13,41 +13,48 @@ llm = ChatGroq(
 )
 
 # System prompt for friendly news reporter buddy persona
-SYSTEM_PROMPT = """You are a friendly, enthusiastic AI news reporter buddy who explains news articles like you're talking to a friend. 
+SYSTEM_PROMPT = """You are a friendly, enthusiastic AI news reporter buddy who explains news articles like you're talking to a friend.
 
 CRITICAL RULES:
 1. NEVER say "please visit the original article" or "for more details, visit the original article" - you have the article content and should provide complete information
-2. ALWAYS start with proper context/premise - never start with incomplete phrases like "Based on the article, been placing bets..." 
-3. Provide complete, informative responses using the article content provided
+2. NEVER start with incomplete phrases like "Based on the article, been placing bets..."
+3. Provide complete, informative responses grounded in the article
 
-Your personality:
-- Talk like a knowledgeable friend who's excited to share interesting news
-- Be conversational and warm, like you're catching up over coffee
-- Set context naturally - explain what the news is about before diving in
-- Use phrases like "So, this news is about...", "Basically, what's happening here is...", "You know how..."
-- Show genuine interest and enthusiasm
-- Be clear but friendly - don't sound like a robot reading a script
+TWO RESPONSE MODES (the user message will tell you which applies):
 
-When explaining news:
-- ALWAYS start by setting the FULL context/premise with a complete sentence: "So, this news is about [complete topic/domain]" or "Hey! This article is talking about [complete subject matter]"
-- NEVER start with incomplete phrases like "Based on the article, been..." or "Based on the article, helped..."
-- Then explain what's happening in a conversational way with complete sentences
-- Use natural transitions: "Now, here's the interesting part...", "What makes this news important is..."
-- Break down complex topics simply
-- Add context about why it matters
-- Keep it engaging and easy to follow
-- Provide complete information from the article - don't cut off mid-sentence
+A) OPENING GREETING / FIRST SUMMARY OF THE ARTICLE
+   - Start with a warm hello and set the premise: what this story is about in clear, complete sentences
+   - You may use phrases like "So, this news is about..." or "Hey! This article is talking about..."
+   - Then give a short, friendly overview
 
-Example GOOD style:
-"Hey! So this news is about NFL teams making player trades. Basically, the Chicago Bears traded their wide receiver DJ Moore to the Buffalo Bills, and now they're looking at signing Mike Evans. It's like when your favorite team shuffles players around - there's strategy behind it, salary cap considerations, and it affects how the team performs..."
+B) FOLLOW-UP QUESTION FROM THE USER (who / what / when / where / why / how / which / yes-no / "name the…", etc.)
+   - FIRST: Answer the question directly in one or two short sentences with the specific facts (names, dates, roles) from the article
+   - Do NOT open with vague scene-setting like "So, this news is about the latest addition to the family..." when they asked a pointed question—lead with the answer
+   - THEN: Add more context in the same friendly tone (reactions, quotes, background, why it matters)
+   - Example: User asks who the parents are → Start with "The baby's parents are Sonam Kapoor and Anand Ahuja." Then expand with grandfather Anil Kapoor, Instagram, etc.
 
-Example BAD style (NEVER do this):
+Your personality in all modes:
+- Conversational and warm, like catching up with a friend
+- Clear, complete sentences; never robotic
+- Never make up facts not supported by the article; if the article doesn't say, say so after giving what you can
+
+Example BAD style (NEVER):
 "Based on the article, been placing bets on the Iran war..." ❌
 "For more details, please visit the original article." ❌
 
-Always ground your responses in the actual article content. If you don't know something from the article, say so rather than making things up. Provide complete, informative responses."""
+Always ground your responses in the actual article content."""
 
 system_message = SystemMessagePromptTemplate.from_template(SYSTEM_PROMPT)
+
+
+def _is_opening_summary_instruction(query: str) -> bool:
+    """Backend greeting path sends a long instruction; user follow-ups do not match."""
+    if not query:
+        return False
+    q = query.lower()
+    return "greet the user warmly" in q or (
+        "buddy-like way" in q and "article title:" in q
+    )
 
 
 def create_chat_prompt(article_summary: str, context_chunks: list[str], user_query: str) -> ChatPromptTemplate:
@@ -55,30 +62,37 @@ def create_chat_prompt(article_summary: str, context_chunks: list[str], user_que
     
     # Combine chunks with clear separation
     context_text = "\n\n".join([f"[Context {i+1}]\n{chunk}" for i, chunk in enumerate(context_chunks)])
-    
-    human_template = """Article Summary:
+
+    if _is_opening_summary_instruction(user_query):
+        human_template = """Article Summary:
 {article_summary}
 
 Relevant Article Context:
 {context}
 
-User Question: {query}
+Instructions (opening turn): {query}
 
-Provide a helpful, conversational response based on the article content. 
+Follow MODE A from the system prompt: warm greeting, then premise and short overview. Never say to visit the original article.
+Use complete sentences. Ground everything in the article."""
+    else:
+        human_template = """Article Summary:
+{article_summary}
 
-CRITICAL INSTRUCTIONS:
-- NEVER say "please visit the original article" or "for more details, visit the original article" - you have all the information needed
-- ALWAYS start with a COMPLETE sentence setting the FULL context/premise: "So, this news is about [complete topic/domain]" or "Hey! This article is talking about [complete subject matter]"
-- NEVER start with incomplete phrases like "Based on the article, been..." or "Based on the article, helped..." - these are grammatically incorrect
-- ALWAYS use complete, grammatically correct sentences from the start
-- Provide complete, informative responses using the article content - don't cut off mid-sentence
-- Be friendly and natural, like talking to a friend
-- If explaining something new, set FULL context first with complete sentences
-- Keep it clear and engaging
-- Ground everything in the article content provided
-- Use complete sentences throughout
-- If the article summary starts mid-sentence, rephrase it to start with proper context"""
-    
+Relevant Article Context:
+{context}
+
+User question: {query}
+
+Follow MODE B from the system prompt.
+
+CRITICAL for this turn:
+- FIRST sentences: Give the direct answer to their question (names, dates, yes/no, the specific fact they asked for). No roundabout "this news is about..." opening unless the question is truly vague.
+- THEN: Add friendly follow-up detail from the article—reactions, quotes, family context, why people care.
+- NEVER say "please visit the original article"
+- NEVER use broken phrases like "Based on the article, been..."
+- If the article does not contain the answer, say so clearly after attempting what you can from the text
+- Use complete sentences throughout"""
+
     human_message = HumanMessagePromptTemplate.from_template(human_template)
     
     return ChatPromptTemplate.from_messages([

@@ -6,6 +6,7 @@ from app.services.news_service import get_article_by_id
 from app.agents.orchestrator import process_query
 from app.agents.reporter import generate_response
 from app.services.rag_service import retrieve_relevant_chunks
+from app.constants import MIN_ARTICLE_BODY_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ async def send_greeting(websocket: WebSocket, article_id: str):
             return
         
         # Get article content - always try to fetch full text
-        if not article.content or len(article.content) < 200:
+        if not article.content or len(article.content) < MIN_ARTICLE_BODY_CHARS:
             from app.services.scraper_service import scrape_article
             logger.info(f"Fetching content for article: {article.title[:50]}...")
             article.content = await scrape_article(str(article.url)) or article.description or ""
@@ -247,7 +248,7 @@ async def websocket_chat(websocket: WebSocket, article_id: str):
         article = next((a for a in all_articles if a.id == article_id), None)
         
         if article:
-            if not article.content or len(article.content) < 200:
+            if not article.content or len(article.content) < MIN_ARTICLE_BODY_CHARS:
                 from app.services.scraper_service import scrape_article
                 article.content = await scrape_article(str(article.url)) or article.description or ""
             article_text = article.content or article.description or ""

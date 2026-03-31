@@ -2,6 +2,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from app.models.schemas import NewsCategory, NewsResponse, Article
+from app.constants import MIN_ARTICLE_BODY_CHARS
 from app.services.news_service import (
     get_news_by_category,
     get_trending_news,
@@ -104,7 +105,7 @@ async def get_article(article_id: str):
             raise HTTPException(status_code=404, detail="Article not found")
         
         # Fetch full content if not already available - always try to get full text
-        if not article.content or len(article.content) < 500:
+        if not article.content or len(article.content) < MIN_ARTICLE_BODY_CHARS:
             try:
                 logger.info(f"Fetching full content for article: {article.title[:50]}...")
                 content = await scrape_article(str(article.url))
