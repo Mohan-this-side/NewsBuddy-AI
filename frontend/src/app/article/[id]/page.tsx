@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { Article } from '@/types';
 import { newsApi } from '@/lib/api';
@@ -8,12 +8,24 @@ import ArticleView from '@/components/ArticleView';
 import CompanionPanel from '@/components/CompanionPanel';
 import { motion } from 'framer-motion';
 
+const SUGGESTED_ACTIONS = [
+  { label: 'Why is this important?', detail: 'Why is this important?' },
+  { label: 'Tell me more about it', detail: 'Tell me more about it' },
+  { label: 'Key points', detail: 'What are the key points?' },
+  { label: 'Explain simply', detail: 'Explain this in simple terms' },
+];
+
+function dispatchCompanionQuestion(detail: string) {
+  window.dispatchEvent(new CustomEvent('companion-question', { detail }));
+}
+
 export default function ArticlePage() {
   const params = useParams();
   const articleId = params.id as string;
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const articleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadArticle();
@@ -25,8 +37,9 @@ export default function ArticlePage() {
       setError(null);
       const data = await newsApi.getArticle(articleId);
       setArticle(data);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load article');
+    } catch (err: unknown) {
+      const ax = err as { response?: { data?: { detail?: string } } };
+      setError(ax.response?.data?.detail || 'Failed to load article');
       console.error(err);
     } finally {
       setLoading(false);
@@ -35,19 +48,21 @@ export default function ArticlePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="inline-block"
-          >
-            <div className="relative">
-              <div className="w-16 h-16 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
-              <div className="absolute inset-0 w-16 h-16 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
-            </div>
-          </motion.div>
-          <p className="mt-6 text-slate-400 text-lg">Loading article...</p>
+      <div
+        className="flex flex-col w-full max-w-[100vw] min-h-0 h-[calc(100dvh-5rem)] overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900"
+        aria-busy="true"
+        aria-label="Loading article"
+      >
+        <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 py-10 flex-1">
+          <div className="h-8 w-32 bg-slate-800 rounded-lg mb-6 animate-pulse" />
+          <div className="h-10 w-full bg-slate-800 rounded-lg mb-4 animate-pulse" />
+          <div className="h-10 w-4/5 bg-slate-800 rounded-lg mb-8 animate-pulse" />
+          <div className="aspect-[16/9] max-h-64 w-full bg-slate-800 rounded-2xl mb-8 animate-pulse" />
+          <div className="space-y-3">
+            <div className="h-4 w-full bg-slate-800/80 rounded animate-pulse" />
+            <div className="h-4 w-full bg-slate-800/80 rounded animate-pulse" />
+            <div className="h-4 w-11/12 bg-slate-800/80 rounded animate-pulse" />
+          </div>
         </div>
       </div>
     );
@@ -55,7 +70,7 @@ export default function ArticlePage() {
 
   if (error || !article) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
+      <div className="min-h-[calc(100dvh-5rem)] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -69,8 +84,9 @@ export default function ArticlePage() {
             </div>
             <p className="text-red-400 mb-6 text-lg font-semibold">{error || 'Article not found'}</p>
             <button
+              type="button"
               onClick={loadArticle}
-              className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all font-semibold shadow-lg"
+              className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all font-semibold shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               Try Again
             </button>
@@ -81,78 +97,55 @@ export default function ArticlePage() {
   }
 
   return (
-    <div className="h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex overflow-hidden relative">
-      <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Left Panel - Article */}
-        <div className="flex-1 overflow-y-auto relative">
-          <div className="max-w-4xl mx-auto px-6 py-12 pb-48">
+    <div className="flex flex-col sm:flex-row w-full max-w-[100vw] min-h-0 h-[calc(100dvh-5rem)] overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      {/* Reading column: left on desktop — article + docked ask strip */}
+      <div className="flex flex-col flex-1 min-h-0 min-w-0 basis-0">
+        <div className="flex-1 overflow-y-auto min-h-0 overscroll-contain">
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
             <ArticleView article={article} />
           </div>
         </div>
 
-        {/* Right Panel - AI Companion */}
-        <div className="w-full md:w-96 lg:w-[500px] flex-shrink-0 border-l border-slate-800/50 h-full overflow-hidden">
-          <CompanionPanel articleId={articleId} />
-        </div>
-      </div>
-      
-      {/* Fixed Bottom Panel - Article Interaction */}
-      <div className="absolute bottom-0 left-0 right-0 md:right-[500px] lg:right-[500px] p-5 bg-slate-900/98 backdrop-blur-md border-t border-slate-700/50 shadow-2xl z-30">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex flex-col gap-3">
-            {/* Suggested Questions - Larger and more prominent */}
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('companion-question', { detail: 'Why is this important?' }));
-                }}
-                className="px-5 py-3 text-base bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all border border-blue-500/30 font-semibold shadow-lg hover:shadow-xl hover:scale-105 active:scale-95"
-              >
-                Why is this important?
-              </button>
-              <button
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('companion-question', { detail: 'Tell me more about it' }));
-                }}
-                className="px-5 py-3 text-base bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all border border-blue-500/30 font-semibold shadow-lg hover:shadow-xl hover:scale-105 active:scale-95"
-              >
-                Tell me more about it
-              </button>
-              <button
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('companion-question', { detail: 'What are the key points?' }));
-                }}
-                className="px-5 py-3 text-base bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all border border-blue-500/30 font-semibold shadow-lg hover:shadow-xl hover:scale-105 active:scale-95"
-              >
-                Key points
-              </button>
-              <button
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('companion-question', { detail: 'Explain this in simple terms' }));
-                }}
-                className="px-5 py-3 text-base bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all border border-blue-500/30 font-semibold shadow-lg hover:shadow-xl hover:scale-105 active:scale-95"
-              >
-                Explain simply
-              </button>
+        <div className="flex-shrink-0 border-t border-slate-700/50 bg-slate-900/95 backdrop-blur-md supports-[backdrop-filter]:bg-slate-900/85 shadow-[0_-6px_20px_rgba(0,0,0,0.2)]">
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Ask about this story</p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {SUGGESTED_ACTIONS.map(({ label, detail }) => (
+                <button
+                  key={detail}
+                  type="button"
+                  onClick={() => dispatchCompanionQuestion(detail)}
+                  className="min-h-[44px] px-4 py-2.5 text-sm font-medium rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white border border-blue-500/30 shadow-md hover:from-blue-500 hover:to-purple-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 transition-colors"
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            
-            {/* Input field */}
-            <div className="flex items-center gap-3">
-              <input
-                type="text"
-                placeholder="Ask about the news..."
-                className="flex-1 px-5 py-3.5 bg-slate-800/90 text-white text-base rounded-xl border border-slate-700/50 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all duration-300 placeholder:text-slate-500"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                    window.dispatchEvent(new CustomEvent('companion-question', { detail: e.currentTarget.value.trim() }));
-                    e.currentTarget.value = '';
-                    e.preventDefault();
-                  }
-                }}
-              />
-            </div>
+            <label htmlFor="article-ask-input" className="sr-only">
+              Ask the AI reporter about this article
+            </label>
+            <input
+              id="article-ask-input"
+              ref={articleInputRef}
+              type="text"
+              placeholder="Type a question for the reporter…"
+              className="w-full min-h-[48px] px-4 py-3 bg-slate-800/90 text-white text-[0.9375rem] rounded-xl border border-slate-700/50 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 placeholder:text-slate-500"
+              onKeyDown={(e) => {
+                const v = e.currentTarget.value.trim();
+                if (e.key === 'Enter' && v) {
+                  dispatchCompanionQuestion(v);
+                  e.currentTarget.value = '';
+                  e.preventDefault();
+                }
+              }}
+            />
           </div>
         </div>
+      </div>
+
+      {/* Buddy column: right on sm+ — fixed-width rail, full viewport height */}
+      <div className="flex flex-col h-full w-full sm:w-[min(22rem,40vw)] md:w-96 lg:w-[31.25rem] flex-shrink-0 border-slate-800/50 border-t sm:border-t-0 sm:border-l max-h-[48vh] sm:max-h-none sm:min-h-0">
+        <CompanionPanel articleId={articleId} />
       </div>
     </div>
   );

@@ -11,37 +11,34 @@ interface VoiceButtonProps {
 export default function VoiceButton({ isListening, onClick, disabled }: VoiceButtonProps) {
   return (
     <motion.button
+      type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`relative w-14 h-14 rounded-xl flex items-center justify-center transition-all shadow-lg ${
+      aria-pressed={isListening}
+      aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+      title="Voice input works best in Chrome or Edge"
+      className={`relative min-w-[44px] min-h-[44px] w-11 h-11 rounded-xl flex items-center justify-center transition-colors shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 ${
         isListening
           ? 'bg-gradient-to-br from-red-500 to-red-600 hover:from-red-600 hover:to-red-700'
           : 'bg-gradient-to-br from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700'
       } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-      whileHover={disabled ? {} : { scale: 1.1 }}
-      whileTap={disabled ? {} : { scale: 0.95 }}
-      animate={isListening ? { scale: [1, 1.15, 1] } : {}}
-      transition={{ duration: 1.2, repeat: isListening ? Infinity : 0, ease: "easeInOut" }}
+      whileHover={disabled ? {} : { scale: 1.05 }}
+      whileTap={disabled ? {} : { scale: 0.97 }}
+      animate={isListening ? { scale: [1, 1.06, 1] } : {}}
+      transition={{ duration: 1.2, repeat: isListening ? Infinity : 0, ease: 'easeInOut' }}
     >
       {isListening && (
         <>
-          <motion.div
-            className="absolute inset-0 rounded-xl bg-red-500 opacity-40"
-            animate={{ scale: [1, 1.6, 1], opacity: [0.4, 0, 0.4] }}
-            transition={{ duration: 1.2, repeat: Infinity }}
-          />
-          <motion.div
-            className="absolute inset-0 rounded-xl bg-red-500 opacity-30"
-            animate={{ scale: [1, 2, 1], opacity: [0.3, 0, 0.3] }}
-            transition={{ duration: 1.2, repeat: Infinity, delay: 0.3 }}
-          />
+          <span className="absolute inset-0 rounded-xl bg-red-500 opacity-35 animate-ping" aria-hidden />
+          <span className="absolute inset-0 rounded-xl bg-red-500/25" aria-hidden />
         </>
       )}
       <svg
-        className="w-6 h-6 text-white relative z-10"
+        className="w-6 h-6 text-white relative z-10 shrink-0"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"
+        aria-hidden
       >
         <path
           strokeLinecap="round"

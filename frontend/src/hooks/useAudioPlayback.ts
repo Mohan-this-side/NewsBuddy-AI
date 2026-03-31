@@ -106,10 +106,13 @@ export function useAudioPlayback({ onAmplitudeUpdate }: UseAudioPlaybackOptions 
     }
   }, [isPlaying, onAmplitudeUpdate]);
 
-  const playAudio = useCallback(async (audioBlob: Blob) => {
+  /**
+   * Plays one audio blob. Resolves when playback finishes (onended).
+   * Callers that need multiple phrases in sequence should await each call or use a queue.
+   */
+  const playAudio = useCallback(async (audioBlob: Blob): Promise<void> => {
     if (!audioContextRef.current || !analyserRef.current) {
       console.error('❌ AudioContext not initialized, initializing now...');
-      // Try to initialize on the fly
       try {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
         analyserRef.current = audioContextRef.current.createAnalyser();
@@ -118,103 +121,85 @@ export function useAudioPlayback({ onAmplitudeUpdate }: UseAudioPlaybackOptions 
         console.log('✅ AudioContext initialized on the fly');
       } catch (error) {
         console.error('❌ Failed to initialize AudioContext:', error);
-        return;
+        throw error;
       }
     }
 
-    try {
-      // Always try to resume AudioContext (browser autoplay policy)
-      if (audioContextRef.current.state === 'suspended') {
-        console.log('⏸️ AudioContext is suspended, attempting to resume...');
-        try {
-          const resumed = await audioContextRef.current.resume();
-          console.log('✅ AudioContext resumed successfully, state:', audioContextRef.current.state);
-        } catch (resumeError) {
-          console.error('❌ Failed to resume AudioContext:', resumeError);
-          // Don't return - try to play anyway, user might interact
-          console.log('⚠️ Continuing despite suspended state - user interaction may be needed');
-        }
-      } else {
-        console.log('✅ AudioContext is already running, state:', audioContextRef.current.state);
-      }
+    const ctx = audioContextRef.current;
+    const analyser = analyserRef.current;
 
-      console.log('🎵 Decoding audio buffer, blob size:', audioBlob.size, 'bytes');
-      const arrayBuffer = await audioBlob.arrayBuffer();
-      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
-      console.log('✅ Audio buffer decoded, duration:', audioBuffer.duration.toFixed(2), 'seconds');
-
-      // Stop previous source if playing
-      if (sourceRef.current) {
-        try {
-          sourceRef.current.stop();
-          sourceRef.current.disconnect();
-        } catch (e) {
-          // Ignore errors when stopping
-        }
-      }
-
-      // Disconnect analyser first to avoid conflicts
+    if (audioContextRef.current.state === 'suspended') {
       try {
-        analyserRef.current.disconnect();
-      } catch (e) {
-        // Ignore if already disconnected
-      }
-
-      // Create new source
-      const source = audioContextRef.current.createBufferSource();
-      source.buffer = audioBuffer;
-
-      // Connect source -> analyser -> gain -> destination
-      source.connect(analyserRef.current);
-      
-      // Create gain node for volume control (mute/unmute)
-      const gainNode = audioContextRef.current.createGain();
-      gainNode.gain.value = isMuted ? 0 : 1; // Set volume based on mute state
-      
-      // Connect analyser -> gain -> destination
-      analyserRef.current.connect(gainNode);
-      gainNode.connect(audioContextRef.current.destination);
-      
-      console.log(isMuted ? '🔇 Audio connected but muted (volume = 0)' : '🔊 Audio connected and unmuted (volume = 1)');
-      
-      // Store gain node reference for mute toggle
-      (source as any).gainNode = gainNode;
-
-      source.onended = () => {
-        console.log('✅ Audio playback completed');
-        setIsPlaying(false);
-        if (animationFrameRef.current) {
-          cancelAnimationFrame(animationFrameRef.current);
-        }
-        if (onAmplitudeUpdate) {
-          onAmplitudeUpdate(0);
-        }
-      };
-
-      source.onerror = (error) => {
-        console.error('❌ Audio source error:', error);
-        setIsPlaying(false);
-        if (onAmplitudeUpdate) {
-          onAmplitudeUpdate(0);
-        }
-      };
-
-      sourceRef.current = source;
-      setIsPlaying(true);
-      source.start(0);
-      console.log('▶️ Audio playback started');
-
-      // Start amplitude analysis for lip sync
-      if (onAmplitudeUpdate) {
-        analyzeAmplitude();
-      }
-    } catch (error) {
-      console.error('❌ Error playing audio:', error);
-      setIsPlaying(false);
-      if (onAmplitudeUpdate) {
-        onAmplitudeUpdate(0);
+        await audioContextRef.current.resume();
+      } catch (resumeError) {
+        console.error('❌ Failed to resume AudioContext:', resumeError);
       }
     }
+
+    console.log('🎵 Decoding audio buffer, blob size:', audioBlob.size, 'bytes');
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    console.log('✅ Audio buffer decoded, duration:', audioBuffer.duration.toFixed(2), 'seconds');
+
+    return await new Promise<void>((resolve, reject) => {
+      try {
+        if (sourceRef.current) {
+          try {
+            sourceRef.current.stop();
+            sourceRef.current.disconnect();
+          } catch {
+            /* already stopped */
+          }
+          sourceRef.current = null;
+        }
+
+        try {
+          analyser.disconnect();
+        } catch {
+          /* ok */
+        }
+
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(analyser);
+
+        const gainNode = ctx.createGain();
+        gainNode.gain.value = isMuted ? 0 : 1;
+        analyser.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        (source as any).gainNode = gainNode;
+
+        source.onended = () => {
+          console.log('✅ Audio playback completed');
+          setIsPlaying(false);
+          sourceRef.current = null;
+          if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+          }
+          if (onAmplitudeUpdate) {
+            onAmplitudeUpdate(0);
+          }
+          resolve();
+        };
+
+        sourceRef.current = source;
+        setIsPlaying(true);
+        source.start(0);
+        console.log('▶️ Audio playback started');
+
+        if (onAmplitudeUpdate) {
+          analyzeAmplitude();
+        }
+      } catch (error) {
+        console.error('❌ Error starting playback:', error);
+        setIsPlaying(false);
+        if (onAmplitudeUpdate) {
+          onAmplitudeUpdate(0);
+        }
+        reject(error);
+      }
+    });
   }, [isMuted, analyzeAmplitude, onAmplitudeUpdate]);
 
   const playAudioFromUrl = useCallback(async (url: string) => {

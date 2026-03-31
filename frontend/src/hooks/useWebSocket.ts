@@ -11,7 +11,12 @@ export function useWebSocket({ articleId, onMessage, onError }: UseWebSocketOpti
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const onMessageRef = useRef(onMessage);
+  const onErrorRef = useRef(onError);
+  onMessageRef.current = onMessage;
+  onErrorRef.current = onError;
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -32,7 +37,7 @@ export function useWebSocket({ articleId, onMessage, onError }: UseWebSocketOpti
       try {
         const message: WebSocketMessage = JSON.parse(event.data);
         console.log('WebSocket message received:', message);
-        onMessage(message);
+        onMessageRef.current(message);
       } catch (err) {
         console.error('Error parsing WebSocket message:', err, event.data);
       }
@@ -41,17 +46,15 @@ export function useWebSocket({ articleId, onMessage, onError }: UseWebSocketOpti
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
       setIsConnecting(false);
-      // Don't call onError immediately - let onclose handle reconnection
+      onErrorRef.current?.(error);
     };
 
     ws.onclose = (event) => {
       console.log('WebSocket closed:', event.code, event.reason || 'No reason');
       setIsConnected(false);
       setIsConnecting(false);
-      
-      // Only reconnect if it wasn't a normal closure (code 1000)
+
       if (event.code !== 1000) {
-        // Attempt to reconnect after 3 seconds
         reconnectTimeoutRef.current = setTimeout(() => {
           console.log('Attempting to reconnect WebSocket...');
           connect();
@@ -62,7 +65,7 @@ export function useWebSocket({ articleId, onMessage, onError }: UseWebSocketOpti
     };
 
     wsRef.current = ws;
-  }, [articleId, onMessage, onError]);
+  }, [articleId]);
 
   const sendMessage = useCallback((message: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
