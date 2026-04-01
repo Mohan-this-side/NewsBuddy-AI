@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from typing import Optional
@@ -109,6 +110,26 @@ async def scrape_article(url: str) -> Optional[str]:
 
     except Exception as e:
         logger.debug(f"BeautifulSoup scraping failed for {url}: {e}")
+
+    # Method 3: trafilatura (often better on modern news layouts)
+    try:
+        import trafilatura
+
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            response = await client.get(url, headers=_BROWSER_HEADERS)
+            response.raise_for_status()
+            html = response.text
+
+        extracted = await asyncio.to_thread(
+            lambda: trafilatura.extract(html, include_comments=False, include_tables=False)
+        )
+        if extracted and len(extracted.strip()) > 150:
+            cleaned_text = _trim_article_text(extracted.strip())
+            logger.info(f"Successfully scraped article using trafilatura: {len(cleaned_text)} chars")
+            _scrape_cache[cache_key] = cleaned_text
+            return cleaned_text
+    except Exception as e:
+        logger.debug(f"Trafilatura failed for {url}: {e}")
 
     logger.warning(f"All scraping methods failed for {url}")
     return None

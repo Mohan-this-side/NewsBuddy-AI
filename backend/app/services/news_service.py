@@ -53,6 +53,45 @@ def clean_html_text(text: str) -> str:
     return cleaned.strip()
 
 
+def _rss_entry_best_description(entry) -> str:
+    """Prefer summary; fall back to content:encoded / content body (many feeds omit summary)."""
+    if getattr(entry, "summary", None):
+        t = clean_html_text(entry.summary)
+        if len(t) > 40:
+            return t[:300] + ("..." if len(t) > 300 else "")
+    if getattr(entry, "content", None):
+        for item in entry.content:
+            val = item.get("value", "") if isinstance(item, dict) else getattr(item, "value", "")
+            if val:
+                t = clean_html_text(val)
+                if len(t) > 40:
+                    return t[:300] + ("..." if len(t) > 300 else "")
+    desc = getattr(entry, "description", "") or ""
+    t = clean_html_text(desc)
+    return (t[:297] + "...") if len(t) > 300 else t
+
+
+def _rss_entry_image_url(entry) -> Optional[str]:
+    """Best-effort image from RSS media extensions."""
+    try:
+        thumbs = getattr(entry, "media_thumbnail", None)
+        if thumbs and len(thumbs) > 0:
+            u = thumbs[0].get("url") if isinstance(thumbs[0], dict) else None
+            if u:
+                return u
+    except Exception:
+        pass
+    media = getattr(entry, "media_content", None)
+    if media:
+        for m in media:
+            if not isinstance(m, dict):
+                continue
+            u = m.get("url")
+            if u and str(u).startswith("http"):
+                return str(u)
+    return None
+
+
 def extract_google_news_url(link: str) -> str:
     """Extract actual URL from Google News redirect URL."""
     if 'url?q=' in link:
@@ -122,9 +161,7 @@ async def fetch_google_news(category: NewsCategory) -> List[Article]:
                 # Clean title - remove HTML if present
                 title = clean_html_text(entry.title) if entry.title else "No title"
                 
-                # Clean description - remove HTML tags
-                description = clean_html_text(entry.get('summary', ''))
-                # Limit description length
+                description = _rss_entry_best_description(entry)
                 if len(description) > 300:
                     description = description[:297] + "..."
                 
@@ -294,6 +331,80 @@ async def fetch_gnews(category: NewsCategory) -> List[Article]:
     return articles
 
 
+async def fetch_guardian(category: NewsCategory) -> List[Article]:
+    """Optional Guardian Open Platform (free tier with API key)."""
+    articles: List[Article] = []
+    if not settings.guardian_api_key:
+        return articles
+
+    section_map = {
+        NewsCategory.AI: "technology",
+        NewsCategory.SPORTS: "sport",
+        NewsCategory.BUSINESS: "business",
+        NewsCategory.SCIENCE: "science",
+        NewsCategory.GEOPOLITICS: "world",
+    }
+    section = section_map.get(category)
+    if not section:
+        return articles
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                "https://content.guardianapis.com/search",
+                params={
+                    "api-key": settings.guardian_api_key,
+                    "section": section,
+                    "page-size": "15",
+                    "show-fields": "trailText,thumbnail",
+                },
+            )
+            if r.status_code != 200:
+                logger.warning("Guardian API returned status %s", r.status_code)
+                return articles
+            data = r.json().get("response", {})
+            for item in data.get("results", []):
+                try:
+                    url = item.get("webUrl")
+                    if not url:
+                        continue
+                    title = item.get("webTitle") or "No title"
+                    fields = item.get("fields") or {}
+                    trail = fields.get("trailText") or ""
+                    thumb = fields.get("thumbnail")
+                    published_at = datetime.now().replace(tzinfo=None)
+                    if item.get("webPublicationDate"):
+                        try:
+                            dt = datetime.fromisoformat(
+                                item["webPublicationDate"].replace("Z", "+00:00")
+                            )
+                            published_at = dt.replace(tzinfo=None) if dt.tzinfo else dt
+                        except Exception:
+                            pass
+                    article_id = hashlib.md5(url.encode()).hexdigest()
+                    desc = clean_html_text(trail) if trail else None
+                    if desc and len(desc) > 300:
+                        desc = desc[:297] + "..."
+                    articles.append(
+                        Article(
+                            id=article_id,
+                            title=clean_html_text(title),
+                            url=url,
+                            source="The Guardian",
+                            published_at=published_at,
+                            category=category,
+                            description=desc,
+                            image_url=thumb,
+                        )
+                    )
+                except Exception as e:
+                    logger.warning("Error parsing Guardian article: %s", e)
+    except Exception as e:
+        logger.error("Error fetching Guardian: %s", e)
+
+    return articles
+
+
 async def get_news_by_category(
     category: NewsCategory,
     page: int = 1,
@@ -344,6 +455,13 @@ async def get_news_by_category(
                 logger.info(f"Fetched {len(gnews_articles)} articles from GNews")
         except Exception as e:
             logger.error(f"Error fetching GNews: {e}")
+        try:
+            guardian_articles = await fetch_guardian(category)
+            if guardian_articles:
+                all_articles.extend(guardian_articles)
+                logger.info(f"Fetched {len(guardian_articles)} articles from Guardian")
+        except Exception as e:
+            logger.error(f"Error fetching Guardian: {e}")
     
     # If no articles found, return empty list instead of failing
     if not all_articles:
@@ -393,13 +511,14 @@ async def fetch_newsapi_org(category: NewsCategory) -> List[Article]:
             if not api_category:
                 return articles
             
-            # Use headlines endpoint (free, no API key needed)
-            url = f"https://newsapi.org/v2/top-headlines"
+            url = "https://newsapi.org/v2/top-headlines"
             params = {
                 "category": api_category,
                 "country": "us",
                 "pageSize": 20,
             }
+            if settings.newsapi_api_key:
+                params["apiKey"] = settings.newsapi_api_key
             
             response = await client.get(url, params=params, timeout=10.0)
             
@@ -489,7 +608,7 @@ async def fetch_rss_feeds(category: NewsCategory) -> List[Article]:
     
     feeds = rss_feeds.get(category, [])
     
-    for feed_url in feeds[:2]:  # Limit to 2 feeds per category
+    for feed_url in feeds[:3]:  # Up to 3 feeds per category (Verge + TechCrunch + …)
         try:
             feed = feedparser.parse(feed_url)
             
@@ -497,8 +616,7 @@ async def fetch_rss_feeds(category: NewsCategory) -> List[Article]:
                 try:
                     link = entry.link
                     title = clean_html_text(entry.title) if entry.title else "No title"
-                    description = clean_html_text(entry.get('summary', entry.get('description', '')))
-                    
+                    description = _rss_entry_best_description(entry)
                     if len(description) > 300:
                         description = description[:297] + "..."
                     
@@ -514,6 +632,7 @@ async def fetch_rss_feeds(category: NewsCategory) -> List[Article]:
                         source_name = entry.source.get('title', source_name)
                     
                     article_id = hashlib.md5(link.encode()).hexdigest()
+                    img = _rss_entry_image_url(entry)
                     
                     article = Article(
                         id=article_id,
@@ -523,6 +642,7 @@ async def fetch_rss_feeds(category: NewsCategory) -> List[Article]:
                         published_at=published_at,
                         category=category,
                         description=description,
+                        image_url=img,
                     )
                     articles.append(article)
                 except Exception as e:

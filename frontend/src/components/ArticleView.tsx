@@ -81,6 +81,17 @@ export default function ArticleView({ article }: ArticleViewProps) {
           {article.title}
         </h1>
 
+        {article.content_tier && article.content_tier !== 'full' && (
+          <p
+            className="text-xs text-amber-200/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 mb-5"
+            role="status"
+          >
+            {article.content_tier === 'metadata_only'
+              ? 'Limited text: only a headline and short excerpt are available in-app; answers stay within that text.'
+              : 'Partial article text in-app; the reporter uses the excerpt and any fetched body below.'}
+          </p>
+        )}
+
         <div className="flex flex-wrap items-center gap-4 text-sm text-slate-400">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 bg-blue-500 rounded-full shrink-0" />
@@ -125,7 +136,15 @@ export default function ArticleView({ article }: ArticleViewProps) {
         className="text-[0.9375rem] md:text-base text-slate-200 leading-7"
       >
         {article.content ? (
-          <div className="whitespace-pre-wrap space-y-4">{article.content}</div>
+          <div className="space-y-6">
+            {article.description &&
+              (article.content_tier === 'snippet' || article.content_tier === 'metadata_only') && (
+                <p className="text-[0.9375rem] md:text-base text-slate-300/95 leading-7 border-l-2 border-blue-500/40 pl-4 italic">
+                  {article.description}
+                </p>
+              )}
+            <div className="whitespace-pre-wrap space-y-4">{article.content}</div>
+          </div>
         ) : (
           <div className="space-y-4">
             {article.description && (

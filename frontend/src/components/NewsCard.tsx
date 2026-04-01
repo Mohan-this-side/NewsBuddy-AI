@@ -67,7 +67,7 @@ export default function NewsCard({ article, index = 0 }: NewsCardProps) {
               </div>
             </div>
           ) : (
-            <div className="relative w-full h-32 bg-gradient-to-br from-slate-800/50 to-slate-900/50 flex items-center justify-center">
+            <div className="relative w-full aspect-[16/9] min-h-[10rem] max-h-56 bg-gradient-to-br from-slate-800/50 to-slate-900/50 flex items-center justify-center">
               <div className="absolute top-4 left-4">
                 <span className={`
                   px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider
@@ -100,9 +100,13 @@ export default function NewsCard({ article, index = 0 }: NewsCardProps) {
               {article.title}
             </h3>
             
-            {article.description && (
+            {article.description ? (
               <p className="text-sm text-slate-300 line-clamp-3 mb-4 flex-1 leading-relaxed">
                 {article.description}
+              </p>
+            ) : (
+              <p className="text-sm text-slate-500 italic line-clamp-2 mb-4 flex-1">
+                Short brief — open the card for the story and AI companion.
               </p>
             )}
             

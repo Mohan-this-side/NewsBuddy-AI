@@ -14,6 +14,13 @@ class NewsCategory(str, Enum):
     TRENDING = "trending"
 
 
+class ContentTier(str, Enum):
+    """How much article body is available for RAG and the reporter."""
+    FULL = "full"
+    SNIPPET = "snippet"
+    METADATA_ONLY = "metadata_only"
+
+
 class Article(BaseModel):
     id: str
     title: str
@@ -24,6 +31,7 @@ class Article(BaseModel):
     description: Optional[str] = None
     image_url: Optional[HttpUrl] = None
     content: Optional[str] = None  # Full article text
+    content_tier: Optional[ContentTier] = None
 
 
 class NewsResponse(BaseModel):

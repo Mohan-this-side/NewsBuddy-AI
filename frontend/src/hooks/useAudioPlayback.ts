@@ -10,6 +10,8 @@ export function useAudioPlayback({ onAmplitudeUpdate }: UseAudioPlaybackOptions 
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
+  const htmlAudioUrlRef = useRef<string | null>(null);
   const animationFrameRef = useRef<number>();
 
   useEffect(() => {
@@ -107,10 +109,85 @@ export function useAudioPlayback({ onAmplitudeUpdate }: UseAudioPlaybackOptions 
   }, [isPlaying, onAmplitudeUpdate]);
 
   /**
+   * Play MP3 via HTMLAudioElement when Web Audio decode fails (Safari / codec quirks).
+   * Lip sync analyser is skipped in this path.
+   */
+  const playAudioHtmlFallback = useCallback(
+    async (audioBlob: Blob): Promise<void> => {
+      if (htmlAudioRef.current) {
+        try {
+          htmlAudioRef.current.pause();
+          htmlAudioRef.current.src = '';
+        } catch {
+          /* ok */
+        }
+        htmlAudioRef.current = null;
+      }
+      if (htmlAudioUrlRef.current) {
+        URL.revokeObjectURL(htmlAudioUrlRef.current);
+        htmlAudioUrlRef.current = null;
+      }
+
+      const url = URL.createObjectURL(audioBlob);
+      htmlAudioUrlRef.current = url;
+      const audio = new Audio();
+      audio.src = url;
+      audio.volume = isMuted ? 0 : 1;
+      audio.setAttribute('playsinline', 'true');
+      htmlAudioRef.current = audio;
+
+      return new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+          if (htmlAudioUrlRef.current === url) {
+            URL.revokeObjectURL(url);
+            htmlAudioUrlRef.current = null;
+          }
+          if (htmlAudioRef.current === audio) {
+            htmlAudioRef.current = null;
+          }
+        };
+        audio.onended = () => {
+          cleanup();
+          setIsPlaying(false);
+          if (onAmplitudeUpdate) onAmplitudeUpdate(0);
+          resolve();
+        };
+        audio.onerror = () => {
+          cleanup();
+          setIsPlaying(false);
+          if (onAmplitudeUpdate) onAmplitudeUpdate(0);
+          reject(new Error('HTMLAudio playback failed'));
+        };
+        void audio
+          .play()
+          .then(() => {
+            setIsPlaying(true);
+            console.log('▶️ HTMLAudio playback started (fallback)');
+          })
+          .catch((e) => {
+            cleanup();
+            reject(e);
+          });
+      });
+    },
+    [isMuted, onAmplitudeUpdate]
+  );
+
+  /**
    * Plays one audio blob. Resolves when playback finishes (onended).
    * Callers that need multiple phrases in sequence should await each call or use a queue.
    */
   const playAudio = useCallback(async (audioBlob: Blob): Promise<void> => {
+    if (!audioBlob || audioBlob.size < 32) {
+      throw new Error('Invalid or empty audio blob');
+    }
+
+    const t = audioBlob.type || '';
+    if (t.includes('json') || t.includes('text')) {
+      const errText = await audioBlob.text();
+      throw new Error(`TTS returned non-audio (${t}): ${errText.slice(0, 200)}`);
+    }
+
     if (!audioContextRef.current || !analyserRef.current) {
       console.error('❌ AudioContext not initialized, initializing now...');
       try {
@@ -121,24 +198,41 @@ export function useAudioPlayback({ onAmplitudeUpdate }: UseAudioPlaybackOptions 
         console.log('✅ AudioContext initialized on the fly');
       } catch (error) {
         console.error('❌ Failed to initialize AudioContext:', error);
-        throw error;
+        return playAudioHtmlFallback(audioBlob);
       }
     }
 
     const ctx = audioContextRef.current;
     const analyser = analyserRef.current;
 
-    if (audioContextRef.current.state === 'suspended') {
+    if (ctx.state === 'suspended') {
       try {
-        await audioContextRef.current.resume();
+        await ctx.resume();
+        console.log('✅ AudioContext resumed, state:', ctx.state);
       } catch (resumeError) {
         console.error('❌ Failed to resume AudioContext:', resumeError);
       }
     }
 
-    console.log('🎵 Decoding audio buffer, blob size:', audioBlob.size, 'bytes');
-    const arrayBuffer = await audioBlob.arrayBuffer();
-    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    console.log('🎵 Decoding audio buffer, blob size:', audioBlob.size, 'bytes, type:', t || 'unknown');
+
+    let arrayBuffer: ArrayBuffer;
+    try {
+      arrayBuffer = await audioBlob.arrayBuffer();
+    } catch (e) {
+      console.error('❌ Failed to read blob:', e);
+      return playAudioHtmlFallback(audioBlob);
+    }
+
+    let audioBuffer: AudioBuffer;
+    try {
+      const copy = arrayBuffer.slice(0);
+      audioBuffer = await ctx.decodeAudioData(copy);
+    } catch (decodeErr) {
+      console.warn('⚠️ decodeAudioData failed; using HTMLAudio fallback:', decodeErr);
+      return playAudioHtmlFallback(audioBlob);
+    }
+
     console.log('✅ Audio buffer decoded, duration:', audioBuffer.duration.toFixed(2), 'seconds');
 
     return await new Promise<void>((resolve, reject) => {
@@ -200,7 +294,7 @@ export function useAudioPlayback({ onAmplitudeUpdate }: UseAudioPlaybackOptions 
         reject(error);
       }
     });
-  }, [isMuted, analyzeAmplitude, onAmplitudeUpdate]);
+  }, [isMuted, analyzeAmplitude, onAmplitudeUpdate, playAudioHtmlFallback]);
 
   const playAudioFromUrl = useCallback(async (url: string) => {
     try {
@@ -221,11 +315,78 @@ export function useAudioPlayback({ onAmplitudeUpdate }: UseAudioPlaybackOptions 
       }
       sourceRef.current = null;
     }
+    if (htmlAudioRef.current) {
+      try {
+        htmlAudioRef.current.pause();
+        htmlAudioRef.current.src = '';
+      } catch {
+        /* ok */
+      }
+      htmlAudioRef.current = null;
+    }
+    if (htmlAudioUrlRef.current) {
+      URL.revokeObjectURL(htmlAudioUrlRef.current);
+      htmlAudioUrlRef.current = null;
+    }
     setIsPlaying(false);
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
-  }, []);
+    if (onAmplitudeUpdate) {
+      onAmplitudeUpdate(0);
+    }
+  }, [onAmplitudeUpdate]);
+
+  /**
+   * Stops playback with a short gain fade (barge-in), then releases the source.
+   */
+  const stopAudioWithFade = useCallback(
+    async (durationMs = 150): Promise<void> => {
+      if (htmlAudioRef.current) {
+        stopAudio();
+        return;
+      }
+      const src = sourceRef.current;
+      const ctx = audioContextRef.current;
+      if (!src || !ctx) {
+        setIsPlaying(false);
+        if (onAmplitudeUpdate) onAmplitudeUpdate(0);
+        return;
+      }
+
+      const gainNode = (src as unknown as { gainNode?: GainNode }).gainNode;
+      if (!gainNode) {
+        stopAudio();
+        return;
+      }
+
+      const now = ctx.currentTime;
+      const g = gainNode.gain;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(g.value, now);
+      g.linearRampToValueAtTime(0, now + durationMs / 1000);
+
+      await new Promise<void>((resolve) => {
+        window.setTimeout(() => {
+          try {
+            src.stop();
+          } catch {
+            /* already stopped */
+          }
+          sourceRef.current = null;
+          setIsPlaying(false);
+          if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+          }
+          if (onAmplitudeUpdate) {
+            onAmplitudeUpdate(0);
+          }
+          resolve();
+        }, durationMs + 30);
+      });
+    },
+    [onAmplitudeUpdate, stopAudio]
+  );
 
   const toggleMute = useCallback(() => {
     if (!analyserRef.current || !audioContextRef.current) {
@@ -254,6 +415,7 @@ export function useAudioPlayback({ onAmplitudeUpdate }: UseAudioPlaybackOptions 
     playAudio,
     playAudioFromUrl,
     stopAudio,
+    stopAudioWithFade,
     toggleMute,
   };
 }

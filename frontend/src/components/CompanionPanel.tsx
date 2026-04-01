@@ -28,8 +28,10 @@ export default function CompanionPanel({ articleId }: CompanionPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   /** Serializes assistant TTS so the next clip only starts after the previous one finishes. */
   const ttsChainRef = useRef(Promise.resolve());
+  /** Incremented on barge-in so in-flight TTS work is dropped before playAudio. */
+  const ttsGenRef = useRef(0);
 
-  const { playAudio, toggleMute, isMuted, isPlaying } = useAudioPlayback({
+  const { playAudio, stopAudioWithFade, toggleMute, isMuted, isPlaying } = useAudioPlayback({
     onAmplitudeUpdate: setAmplitude,
   });
 
@@ -52,17 +54,31 @@ export default function CompanionPanel({ articleId }: CompanionPanelProps) {
 
   useEffect(() => {
     ttsChainRef.current = Promise.resolve();
+    ttsGenRef.current += 1;
   }, [articleId]);
+
+  const interruptAssistantSpeech = useCallback(async () => {
+    ttsGenRef.current += 1;
+    ttsChainRef.current = Promise.resolve();
+    await stopAudioWithFade(150);
+  }, [stopAudioWithFade]);
 
   const enqueueSynthesizeAndPlay = useCallback(
     (text: string) => {
+      const gen = ttsGenRef.current;
       ttsChainRef.current = ttsChainRef.current
         .then(async () => {
           try {
+            if (gen !== ttsGenRef.current) return;
             setAvatarState('speaking');
             setIsProcessing(true);
 
             const audioBlob = await ttsApi.synthesize(text);
+
+            if (gen !== ttsGenRef.current) {
+              setIsProcessing(false);
+              return;
+            }
 
             if (audioBlob.size === 0) {
               setAvatarState('idle');
@@ -120,6 +136,7 @@ export default function CompanionPanel({ articleId }: CompanionPanelProps) {
           }, 100);
         }
       } else if (wsMessage.type === 'thinking') {
+        void interruptAssistantSpeech();
         setAvatarState('thinking');
         setIsProcessing(true);
       } else if (wsMessage.type === 'error') {
@@ -140,7 +157,7 @@ export default function CompanionPanel({ articleId }: CompanionPanelProps) {
         setIsGreeting(false);
       }
     },
-    [enqueueSynthesizeAndPlay]
+    [enqueueSynthesizeAndPlay, interruptAssistantSpeech]
   );
 
   const { isConnected, sendMessage } = useWebSocket({
@@ -152,6 +169,7 @@ export default function CompanionPanel({ articleId }: CompanionPanelProps) {
     const handleCompanionQuestion = (event: Event) => {
       const question = (event as CustomEvent<string>).detail;
       if (question && isConnected) {
+        void interruptAssistantSpeech();
         sendMessage(question);
         const userMessage: ChatMessage = {
           role: 'user',
@@ -169,11 +187,12 @@ export default function CompanionPanel({ articleId }: CompanionPanelProps) {
     return () => {
       window.removeEventListener('companion-question', handleCompanionQuestion);
     };
-  }, [isConnected, sendMessage]);
+  }, [isConnected, sendMessage, interruptAssistantSpeech]);
 
   const handleVoiceResult = useCallback(
     (transcript: string) => {
       if (transcript.trim()) {
+        void interruptAssistantSpeech();
         sendMessage(transcript);
         const userMessage: ChatMessage = {
           role: 'user',
@@ -186,7 +205,7 @@ export default function CompanionPanel({ articleId }: CompanionPanelProps) {
         setIsGreeting(false);
       }
     },
-    [sendMessage]
+    [sendMessage, interruptAssistantSpeech]
   );
 
   const handleVoiceError = useCallback((code: string) => {
@@ -210,6 +229,14 @@ export default function CompanionPanel({ articleId }: CompanionPanelProps) {
       onResult: handleVoiceResult,
       onError: handleVoiceError,
     });
+
+  const wasListeningRef = useRef(false);
+  useEffect(() => {
+    if (isListening && !wasListeningRef.current) {
+      void interruptAssistantSpeech();
+    }
+    wasListeningRef.current = isListening;
+  }, [isListening, interruptAssistantSpeech]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -242,6 +269,7 @@ export default function CompanionPanel({ articleId }: CompanionPanelProps) {
     e.preventDefault();
     if (inputText.trim() && isConnected) {
       const query = inputText.trim();
+      void interruptAssistantSpeech();
       sendMessage(query);
       const userMessage: ChatMessage = {
         role: 'user',

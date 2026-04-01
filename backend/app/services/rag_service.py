@@ -65,16 +65,57 @@ def get_or_create_index(article_id: str, article_text: str) -> tuple[faiss.Index
     return index, chunk_list
 
 
+def _dedupe_overlapping_chunks(chunks: List[str]) -> List[str]:
+    """Drop chunks that largely repeat earlier chunks (reduces duplicate lines in LLM output)."""
+    out: List[str] = []
+    for c in chunks:
+        c = c.strip()
+        if not c:
+            continue
+        skip = False
+        for o in out:
+            if c == o:
+                skip = True
+                break
+            n = min(len(c), len(o), 120)
+            if n >= 40 and c[:n] == o[:n]:
+                skip = True
+                break
+            if len(c) >= 60 and len(o) >= 60 and (c[:60] in o or o[:60] in c):
+                skip = True
+                break
+        if not skip:
+            out.append(c)
+    return out
+
+
 def retrieve_relevant_chunks(
     query: str,
     article_id: str,
     article_text: str,
-    top_k: int = 4
+    top_k: int = 4,
+    content_tier: Optional[str] = None,
 ) -> List[str]:
     """
     Retrieve top-k most relevant chunks from article for a query.
+    For metadata_only, skip vector search and return the short text as context.
     """
+    tier = content_tier or "full"
+    raw = (article_text or "").strip()
+
+    if tier == "metadata_only":
+        if not raw:
+            return []
+        cap = 1500
+        return [raw[:cap] + ("…" if len(raw) > cap else "")]
+
+    if tier == "snippet":
+        top_k = min(top_k, 3)
+
     try:
+        if len(raw) < 50:
+            return [raw] if raw else []
+
         # Get or create index
         index, chunks = get_or_create_index(article_id, article_text)
         
@@ -87,8 +128,7 @@ def retrieve_relevant_chunks(
         
         # Retrieve chunks
         relevant_chunks = [chunks[i] for i in indices[0] if i < len(chunks)]
-        
-        return relevant_chunks
+        return _dedupe_overlapping_chunks(relevant_chunks)
     except Exception as e:
         logger.error(f"Error retrieving chunks: {e}")
         # Fallback: return first chunk

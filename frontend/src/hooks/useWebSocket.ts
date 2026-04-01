@@ -18,6 +18,9 @@ export function useWebSocket({ articleId, onMessage, onError }: UseWebSocketOpti
   onMessageRef.current = onMessage;
   onErrorRef.current = onError;
 
+  /** Set when a user_message is sent; used for dev latency logs (first thinking / first text). */
+  const userTurnStartRef = useRef<number | null>(null);
+
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
@@ -36,6 +39,21 @@ export function useWebSocket({ articleId, onMessage, onError }: UseWebSocketOpti
     ws.onmessage = (event) => {
       try {
         const message: WebSocketMessage = JSON.parse(event.data);
+        const t0 = userTurnStartRef.current;
+        if (t0 != null && typeof performance !== 'undefined') {
+          const elapsed = Math.round(performance.now() - t0);
+          if (message.type === 'thinking') {
+            console.info(`[latency] first_thinking_ms=${elapsed}`);
+          }
+          if (message.type === 'text') {
+            console.info(`[latency] first_assistant_text_ms=${elapsed}`);
+            userTurnStartRef.current = null;
+          }
+          if (message.type === 'error') {
+            console.info(`[latency] error_after_ms=${elapsed}`);
+            userTurnStartRef.current = null;
+          }
+        }
         console.log('WebSocket message received:', message);
         onMessageRef.current(message);
       } catch (err) {
@@ -69,6 +87,9 @@ export function useWebSocket({ articleId, onMessage, onError }: UseWebSocketOpti
 
   const sendMessage = useCallback((message: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      if (typeof performance !== 'undefined') {
+        userTurnStartRef.current = performance.now();
+      }
       const payload = {
         type: 'user_message',
         content: message,
