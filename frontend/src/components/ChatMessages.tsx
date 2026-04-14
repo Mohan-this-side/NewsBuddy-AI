@@ -27,15 +27,14 @@ export default function ChatMessages({ messages }: ChatMessagesProps) {
               </div>
             )}
             <motion.div
-              className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-lg ${
+              className={`max-w-[90%] rounded-2xl px-4 py-3 shadow-lg ${
                 message.role === 'user'
                   ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white'
                   : 'bg-slate-800/80 backdrop-blur-sm text-slate-100 border border-slate-700/50'
               }`}
-              whileHover={{ scale: 1.02 }}
               transition={{ duration: 0.2 }}
             >
-              <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+              <p className="text-[0.9375rem] md:text-base leading-relaxed whitespace-pre-wrap">{message.content}</p>
               <div className="flex items-center justify-between mt-2">
                 <span className="text-xs opacity-60">
                   {format(message.timestamp, 'HH:mm')}

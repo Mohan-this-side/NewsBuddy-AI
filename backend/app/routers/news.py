@@ -1,7 +1,8 @@
 import logging
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
-from app.models.schemas import NewsCategory, NewsResponse, Article
+from app.models.schemas import NewsCategory, NewsResponse, Article, ContentTier
+from app.constants import compute_content_tier
 from app.constants import MIN_ARTICLE_BODY_CHARS
 from app.services.news_service import (
     get_news_by_category,
@@ -123,7 +124,10 @@ async def get_article(article_id: str):
                     article.content = article.description
                 elif not article.content:
                     article.content = article.description or "Full article content is being loaded. Please wait a moment or try refreshing."
-        
+
+        body = (article.content or article.description or "").strip()
+        article.content_tier = ContentTier(compute_content_tier(body))
+
         return article
     except HTTPException:
         raise

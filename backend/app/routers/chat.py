@@ -1,16 +1,48 @@
 import logging
 import json
+import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from typing import Dict
 from app.services.news_service import get_article_by_id
 from app.agents.orchestrator import process_query
 from app.agents.reporter import generate_response
 from app.services.rag_service import retrieve_relevant_chunks
-from app.constants import MIN_ARTICLE_BODY_CHARS
+from app.constants import MIN_ARTICLE_BODY_CHARS, compute_content_tier
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
+
+
+def _build_context_followup_line(title: str, category: str, snippet: str) -> str:
+    """One-sentence, article-aware follow-up instead of a generic script."""
+    t = (title or "this story").strip()
+    if len(t) > 90:
+        t = t[:87] + "…"
+    cat = (str(category) if category else "news").lower().replace("_", " ")
+    s = (snippet or "").strip().replace("\n", " ")
+    if len(s) > 160:
+        s = s[:157] + "…"
+    if s:
+        return (
+            f"Want me to unpack anything about this {cat} piece—especially around {s}—or do you have a specific question?"
+        )
+    return (
+        f"Want me to go deeper on «{t}», or is there a particular angle you are curious about?"
+    )
+
+
+def _friendly_opening_from_article(article, article_summary: str) -> str:
+    """Warm overview from title + excerpt when the LLM greeting can't run (e.g. provider limits)."""
+    excerpt = (getattr(article, "description", None) or article_summary or "").strip().replace("\n", " ")
+    if len(excerpt) > 480:
+        excerpt = excerpt[:477] + "…"
+    title = (getattr(article, "title", None) or "this story").strip()
+    return (
+        f"Hey! Here's the gist: {title}. {excerpt} "
+        f"Ask me anything if you want to go deeper on this story."
+    )
+
 
 # Store active WebSocket connections and conversation history
 active_connections: Dict[str, WebSocket] = {}
@@ -68,28 +100,27 @@ async def send_greeting(websocket: WebSocket, article_id: str):
         article_text = article.content or article.description or ""
         article_summary = article_text[:1000] if len(article_text) > 1000 else article_text
         
-        # Create a more conversational greeting prompt with better instructions
+        # Opening turn: headline-level overview first—never a mid-article fragment or stray quote
         greeting_query = (
-            f"Greet the user warmly like a friend (say 'Hey!' or 'Hi there!' or similar), then explain this news article in a conversational, buddy-like way. "
-            f"\n\nCRITICAL RULES:\n"
-            f"1. Start with a COMPLETE sentence setting the FULL context/premise - tell them what domain/topic this news is about with a complete sentence.\n"
-            f"   GOOD examples: 'So, this news is about prediction markets and how people are betting on geopolitical events' or 'Hey! This article is talking about tennis player Sonay Kartal's comeback victory' or 'This news is about financial markets recovering after political developments'\n"
-            f"   BAD examples: 'Based on the article, been placing bets...' or 'Based on the article, helped kick-start...' - these are incomplete and grammatically wrong\n"
-            f"2. NEVER say 'please visit the original article' or 'for more details, visit the original article' - you have the article content, provide complete information\n"
-            f"3. Use complete, grammatically correct sentences throughout\n"
-            f"4. Provide a friendly, engaging 2-3 sentence summary that sounds natural and conversational\n"
-            f"5. If the article content starts mid-sentence, rephrase it to start with proper context\n\n"
+            f"Greet the user warmly (e.g. 'Hey!' or 'Hi there!'), then give a clear OVERVIEW of this news story.\n\n"
+            f"CRITICAL:\n"
+            f"1. In your own words: WHO did WHAT, what CHANGED, and WHY it matters—tied to the headline below. 2–4 short sentences.\n"
+            f"2. Do NOT start with a quote, a lone month/date, or a fragment from the middle of the article.\n"
+            f"3. NEVER say 'visit the original article'.\n"
+            f"4. If the pasted text starts mid-sentence, infer the full story from the title and rephrase cleanly.\n\n"
             f"Article title: {article.title}\n"
             f"Article category: {article.category}\n"
-            f"Article content: {article_summary[:1000]}"
+            f"Article text (may be partial): {article_summary[:800]}"
         )
         
+        _content_tier = compute_content_tier(article_text)
         # Get relevant chunks for summary - get more context
         relevant_chunks = retrieve_relevant_chunks(
             "What is this article about? What is the main topic, key information, and overall context?",
             article_id,
             article_text,
-            top_k=6  # More chunks for better context
+            top_k=4,
+            content_tier=_content_tier,
         )
         
         # Use more context for better greeting
@@ -99,8 +130,26 @@ async def send_greeting(websocket: WebSocket, article_id: str):
             article_summary=greeting_summary,
             context_chunks=relevant_chunks,
             user_query=greeting_query,
+            content_tier=_content_tier,
         )
-        
+
+        gl = (greeting or "").strip().lower()
+        # When the LLM call fails (rate limit, etc.), reporter returns error-shaped text—replace with a normal overview.
+        _greeting_llm_failed = (
+            "i can't run the full ai reporter",
+            "i'm a bit backed up right now",
+            "i couldn't finish an ai-written reply",
+            "i couldn't generate a reply just now",
+        )
+        if any(gl.startswith(p) for p in _greeting_llm_failed):
+            if gl.startswith("i'm a bit backed up") or gl.startswith("i can't run the full ai reporter"):
+                logger.warning(
+                    "Opening greeting: LLM unavailable (often provider rate limit); using title+excerpt overview."
+                )
+            greeting = _friendly_opening_from_article(article, article_summary)
+        elif gl.startswith("here's what the article says"):
+            greeting = _friendly_opening_from_article(article, article_summary)
+
         # Ensure greeting is not empty and starts properly
         if not greeting or not greeting.strip():
             # Create a proper greeting with complete sentences
@@ -142,10 +191,13 @@ async def send_greeting(websocket: WebSocket, article_id: str):
             greeting_sent[article_id] = True
             logger.info(f"Greeting sent successfully for article {article_id}")
             
-            # Schedule follow-up question after 8 seconds if no user interaction
+            # Schedule follow-up after a short pause if the user has not spoken yet
             import asyncio
+            snippet_for_followup = (article_summary[:400] if article_summary else "") or (
+                (article.description or "")[:400]
+            )
             async def send_followup():
-                await asyncio.sleep(8)
+                await asyncio.sleep(12)
                 # Check if WebSocket is still connected and user hasn't sent a message
                 if article_id in active_connections and article_id in conversation_history:
                     last_messages = conversation_history[article_id]
@@ -153,7 +205,11 @@ async def send_greeting(websocket: WebSocket, article_id: str):
                     user_messages = [m for m in last_messages if m.get("role") == "user"]
                     if len(user_messages) == 0:
                         try:
-                            followup = "Would you like me to dive deeper into any specific aspect of this news, or do you have any questions about it?"
+                            followup = _build_context_followup_line(
+                                article.title,
+                                str(article.category.value if hasattr(article.category, "value") else article.category),
+                                snippet_for_followup,
+                            )
                             await websocket.send_json({
                                 "type": "text",
                                 "content": followup,
@@ -300,12 +356,20 @@ async def websocket_chat(websocket: WebSocket, article_id: str):
                         })
                         continue
                     
+                    _tier = compute_content_tier(article_text)
+                    _t0 = time.perf_counter()
                     response = await process_query(
                         article_id=article_id,
                         article_text=article_text,
                         article_summary=article_summary,
                         user_query=user_query,
                         conversation_history=conversation_history.get(article_id, []),
+                        content_tier=_tier,
+                    )
+                    logger.info(
+                        "chat_latency article_id=%s process_query_ms=%.1f",
+                        article_id,
+                        (time.perf_counter() - _t0) * 1000,
                     )
                     
                     if not response or not response.strip():

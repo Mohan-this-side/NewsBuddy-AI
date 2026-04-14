@@ -1,60 +1,53 @@
-# TTS (Text-to-Speech) Options
+# TTS options (Groq and Edge)
 
-## Current Implementation
+This file summarizes how speech works in the project and how to adjust voices in code. The running behavior lives in **`backend/app/services/tts_service.py`** (and defaults in **`backend/app/config.py`**).
 
-The system now supports **Groq TTS** as the primary provider, with Edge TTS as a fallback.
+---
 
-## Groq TTS (Primary - Recommended)
+## Pipeline
 
-**Endpoint**: `https://api.groq.com/openai/v1/audio/speech`
+1. **Try Groq** — Uses Groq’s audio/speech API when the account has access and the call succeeds.  
+2. **Fallback: Edge TTS** — Uses the `edge-tts` Python package with a chosen voice if Groq fails or is not configured for speech.
 
-**Advantages**:
-- More natural, conversational voice quality
-- Fast response times
-- Uses your existing Groq API key
-- OpenAI-compatible API
+So the app still speaks even when Groq TTS is not enabled for your org.
 
-**Available Voices**:
-- `alloy` - Balanced, natural voice
-- `echo` - Clear, professional voice  
-- `fable` - Warm, friendly voice
-- `onyx` - Deep, authoritative voice
-- `nova` - Bright, energetic voice (default - good for news)
-- `shimmer` - Soft, gentle voice
+---
 
-**Usage**: The system automatically uses Groq TTS. If it fails, it falls back to Edge TTS.
+## Groq TTS (primary)
 
-## Edge TTS (Fallback)
+- **Endpoint pattern:** OpenAI-compatible audio speech URL on Groq’s host (see Groq docs for the exact path; our service wraps the same pattern).  
+- **Model (example):** `playai-tts` — check Groq’s model list for current speech model IDs.  
+- **Voice (example):** `Angelo-PlayAI` — must match a voice Groq documents for that model.
 
-**Provider**: Microsoft Edge TTS (free)
+Override in `.env` if needed:
 
-**Advantages**:
-- Free to use
-- Multiple language support
-- Good quality
-
-**Disadvantages**:
-- Can have 403 errors due to rate limiting
-- Less natural than Groq TTS
-
-## Configuration
-
-To change the default voice, update `DEFAULT_VOICE` in `backend/app/services/tts_service.py`:
-
-```python
-DEFAULT_VOICE = "nova"  # Change to: alloy, echo, fable, onyx, nova, or shimmer
+```env
+GROQ_TTS_MODEL=playai-tts
+GROQ_TTS_VOICE=Angelo-PlayAI
 ```
 
-To switch providers, change `TTS_PROVIDER`:
+Access problems (`403` from Groq) are covered in [GROQ_TTS_SETUP.md](GROQ_TTS_SETUP.md).
 
-```python
-TTS_PROVIDER = "groq"  # Options: "groq" or "edge_tts"
-```
+---
 
-## Testing
+## Edge TTS (fallback)
 
-Test TTS with:
-```bash
-cd backend
-python test_tts.py
-```
+- **Library:** `edge-tts` on the backend.  
+- **Default voice:** configured in `tts_service.py` (e.g. an en-US neural voice).  
+- To use another Edge voice: pick a voice name from Microsoft’s neural list and set the constant or configuration the service uses for the Edge path.
+
+---
+
+## Where to change defaults
+
+| What | Where |
+|------|--------|
+| Groq model / voice env keys | `app/config.py` + `.env` |
+| Groq vs Edge logic, fallbacks | `app/services/tts_service.py` |
+| HTTP API for synthesized audio | `app/routers/tts.py` — `POST /api/tts/synthesize` |
+
+---
+
+## Frontend
+
+The companion panel calls **`POST /api/tts/synthesize`** with JSON `{"text":"..."}` and plays the returned audio unless the user has muted playback.

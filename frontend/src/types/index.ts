@@ -8,6 +8,8 @@ export enum NewsCategory {
   TRENDING = "trending",
 }
 
+export type ContentTier = "full" | "snippet" | "metadata_only";
+
 export interface Article {
   id: string;
   title: string;
@@ -18,6 +20,7 @@ export interface Article {
   description?: string;
   image_url?: string;
   content?: string;
+  content_tier?: ContentTier;
 }
 
 export interface NewsResponse {

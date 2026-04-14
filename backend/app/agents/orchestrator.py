@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from app.agents.context_analyzer import analyze_context
 from app.agents.reporter import generate_response
+from app.constants import compute_content_tier
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class AgentState(TypedDict):
     article_text: str
     article_summary: str
     user_query: str
+    content_tier: str
     context: dict
     response: str
     conversation_history: Annotated[list, add_messages]
@@ -36,6 +38,7 @@ async def retrieve_context_node(state: AgentState) -> AgentState:
         article_id=state["article_id"],
         article_text=state["article_text"],
         article_summary=state.get("article_summary", ""),
+        content_tier=state.get("content_tier", "full"),
     )
     
     state["context"] = context
@@ -51,6 +54,9 @@ async def generate_response_node(state: AgentState) -> AgentState:
         context_chunks=context["relevant_chunks"],
         user_query=state["user_query"],
         conversation_history=state.get("conversation_history", []),
+        content_tier=state.get("content_tier", "full"),
+        web_snippets=context.get("web_snippets") or [],
+        web_answer=(context.get("web_answer") or "").strip() or None,
     )
     
     state["response"] = response
@@ -83,13 +89,18 @@ async def process_query(
     article_summary: str,
     user_query: str,
     conversation_history: list[dict] = None,
+    content_tier: str = "full",
 ) -> str:
     """
     Process a user query through the multi-agent pipeline.
     """
     try:
-        if not article_text or len(article_text.strip()) < 50:
-            logger.warning(f"Insufficient article text for query: {user_query}")
+        stripped = (article_text or "").strip()
+        if not stripped:
+            logger.warning("Empty article text for query: %s", user_query)
+            return "I'm sorry, but I don't have enough article content to answer your question. Please try refreshing the page."
+        if len(stripped) < 50 and compute_content_tier(article_text) != "metadata_only":
+            logger.warning("Insufficient article text for query: %s", user_query)
             return "I'm sorry, but I don't have enough article content to answer your question. Please try refreshing the page."
         
         initial_state = {
@@ -97,6 +108,7 @@ async def process_query(
             "article_text": article_text,
             "article_summary": article_summary or article_text[:200],
             "user_query": user_query,
+            "content_tier": content_tier or "full",
             "conversation_history": conversation_history or [],
         }
         

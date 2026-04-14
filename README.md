@@ -1,72 +1,110 @@
-# AI News Reporter
+# NewsBuddy AI
 
-An intelligent news platform that aggregates real-time news and enables users to have interactive voice conversations with an AI-powered news companion. The system combines multi-source news aggregation, a multi-agent RAG backend, and a futuristic animated AI reporter that talks users through each article.
+### Problem
+
+News is scattered across sites and formats. Long articles are slow to parse, and **generic assistants** are a poor fit: they are not tied to the page you are reading, and they may **hallucinate** or drift off-topic. Readers need a fast way to **orient** on a story and ask **follow-ups that stay grounded in that article** (and optionally in a thin layer of live web context when enabled), without leaving the reading flow.
+
+### Solution
+
+We built a **single-session companion per article**: when you open a story, the system ingests available article text, indexes it for **retrieval-augmented generation (RAG)**, and opens a **WebSocket** chat that streams an opening summary and then answers your questions using retrieved chunks as context. You can type or use **browser speech-to-text**; replies can be **read aloud** via TTS. That keeps the model **anchored to the source** you chose, not to the open web by default.
+
+### What is NewsBuddy AI?
+
+**NewsBuddy AI** is that product: a **full-stack web application** that combines a **Next.js** frontend with a **FastAPI** backend, **FAISS**-backed embeddings over article chunks, **Groq** for the language model, optional **Tavily** for web snippets when the pipeline allows it, and **TTS** (Groq with Edge fallback) so the companion can speak. It is the name we use for the app, the API, and the voice + chat experience described above.
+
+**Maintainers:** Mohan Bhosale, Karthikeyan Sugavanan
+
+---
 
 ## Features
 
-- 📰 **Multi-Source News Aggregation**: Fetches news from Google News RSS, Hacker News, and GNews API, with graceful fallbacks and caching.
-- 🤖 **AI-Powered Companion**: Animated reporter avatar that summarizes articles, adds context, and answers follow-up questions conversationally.
-- 🎤 **Voice Interaction**: Browser-native speech recognition plus neural text-to-speech for hands-free news consumption.
-- 💬 **Real-Time Chat**: WebSocket-based, article-grounded conversation powered by a multi-agent RAG pipeline.
-- 🎨 **Futuristic UI**: Glassmorphism, gradients, smooth transitions, and an immersive two-panel layout (article on the left, AI reporter on the right).
-- ⚡ **Low Latency**: End-to-end voice-to-voice target under 3 seconds, with an explicit latency budget across each component.
+1. **News feed** — Categories and trending lists from RSS and optional provider APIs ([backend/README_API_SETUP.md](backend/README_API_SETUP.md)).
+2. **Article view** — Full or partial body when scraping succeeds; the UI surfaces when content is truncated.
+3. **Companion chat** — Per-article WebSocket session: opening summary, then Q&A via **text** or **browser speech-to-text** (Web Speech API).
+4. **Spoken replies** — Assistant text is synthesized through `POST /api/tts/synthesize` (Groq primary, Edge TTS fallback) with playback and lip-sync in the companion panel.
 
-## System Architecture
+Performance focus: minimize time from user send to first assistant text on screen. Client-side timing hooks are documented in [docs/latency.md](docs/latency.md).
 
-High-level architecture of the platform:
+---
 
+## Screenshots
+
+Browse categories and trending stories, then open an article. The companion sits beside the reader with voice and text input, suggested prompts, and spoken replies.
+
+### Home & category browsing
+
+![NewsBuddy AI home and category browsing](docs/Al%20News%20Reporter%20frontend%20with%20pictures.png)
+
+### Article view with companion
+
+![Article view with NewsBuddy AI companion panel](docs/trump-news.png)
+
+---
+
+## Quick start
+
+1. Configure **Setup** below. You need at least a **Groq** API key for chat; speech input is most reliable in **Chrome** or **Edge**.
+2. Run the backend, then the frontend. Open `http://localhost:3000`.
+3. Open an article, wait for the opening message, then send a follow-up (typing works if the microphone is unavailable).
+4. Optional: in DevTools → Console, watch `[latency] first_assistant_text_ms` after a send ([docs/latency.md](docs/latency.md)).
+
+Additional provider keys and TTS setup: [backend/README_API_SETUP.md](backend/README_API_SETUP.md), [backend/GROQ_TTS_SETUP.md](backend/GROQ_TTS_SETUP.md).
+
+---
+
+## Architecture (high level)
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial', 'lineColor': '#94a3b8', 'primaryColor': '#1e293b', 'primaryTextColor': '#f8fafc', 'primaryBorderColor': '#475569', 'secondaryColor': '#0f172a', 'tertiaryColor': '#1e293b', 'nodeTextSize': '18px'}, 'flowchart': {'curve': 'basis', 'padding': 20, 'nodeSpacing': 30, 'rankSpacing': 50, 'htmlLabels': true, 'wrappingWidth': 200}}}%%
 
 flowchart TB
-    U["🧑 User"]:::userStyle --> FE["🌐 Next.js Frontend"]:::feStyle
+    U["User"]:::userStyle --> FE["Next.js Frontend"]:::feStyle
 
-    subgraph Frontend["🖥️ FRONTEND — Next.js"]
+    subgraph Frontend["Frontend — Next.js"]
         direction TB
-        FE --> CAT["📂 Category & Home Pages"]:::feNode
-        CAT --> ART["📰 Article View Page"]:::feNode
-        ART --> COMP["💬 Companion Panel"]:::compStyle
+        FE --> CAT["Category and Home"]:::feNode
+        CAT --> ART["Article View"]:::feNode
+        ART --> COMP["Companion Panel"]:::compStyle
 
-        subgraph InputLayer["🎤 Input Layer"]
+        subgraph InputLayer["Input"]
             direction LR
-            STT["🎙️ Web Speech API — STT"]:::inputNode
-            TXT["⌨️ Text Input"]:::inputNode
+            STT["Web Speech API STT"]:::inputNode
+            TXT["Text Input"]:::inputNode
         end
 
         COMP --> STT
         COMP --> TXT
 
-        STT --> WS_CLIENT["🔌 WebSocket Client"]:::wsStyle
+        STT --> WS_CLIENT["WebSocket Client"]:::wsStyle
         TXT --> WS_CLIENT
 
-        COMP <-->|"audio stream"| AUDIO["🔈 Web Audio API — Playback + Lip Sync"]:::audioNode
+        COMP <-->|"playback"| AUDIO["Web Audio playback plus lip sync"]:::audioNode
     end
 
-    WS_CLIENT ==>|"WebSocket Connection"| WS_API
+    WS_CLIENT ==>|"WebSocket"| WS_API
 
-    subgraph Backend["⚙️ BACKEND — FastAPI"]
+    subgraph Backend["Backend — FastAPI"]
         direction TB
-        WS_API["⚡ WS /ws/chat/{article_id}"]:::apiStyle --> CTX["🔍 Context Builder + RAG"]:::beNode
+        WS_API["WS /ws/chat/{article_id}"]:::apiStyle --> CTX["Context plus RAG"]:::beNode
 
-        subgraph DataSources["📚 Data Sources"]
+        subgraph DataSources["Data"]
             direction LR
-            NEWS["📡 News Aggregator"]:::dataNode
-            VEC["🗄️ FAISS Vector Store"]:::dataNode
+            NEWS["News sources"]:::dataNode
+            VEC["FAISS per article"]:::dataNode
         end
 
         CTX --> NEWS
         CTX --> VEC
-        CTX --> AGENT["🤖 Reporter Agent"]:::agentStyle
+        CTX --> AGENT["Reporter agent"]:::agentStyle
 
-        AGENT <-->|"inference"| LLM["🧠 Groq Llama 3.3 70B"]:::llmStyle
+        AGENT <-->|"inference"| LLM["Groq chat model"]:::llmStyle
 
-        AGENT --> RESP["📝 Grounded Answer Text"]:::beNode
-        RESP --> TTS_API["📡 POST /api/tts/synthesize"]:::apiStyle
-        TTS_API --> TTS["🗣️ Groq TTS + Edge TTS"]:::ttsStyle
+        AGENT --> RESP["Answer text"]:::beNode
+        RESP --> TTS_API["POST /api/tts/synthesize"]:::apiStyle
+        TTS_API --> TTS["Groq TTS plus Edge fallback"]:::ttsStyle
     end
 
-    TTS ==>|"audio response"| AUDIO
+    TTS ==>|"audio bytes"| AUDIO
 
     classDef userStyle fill:#6366f1,stroke:#818cf8,stroke-width:3px,color:#fff,font-size:18px,font-weight:bold
     classDef feStyle fill:#0ea5e9,stroke:#38bdf8,stroke-width:3px,color:#fff,font-size:18px,font-weight:bold
@@ -88,204 +126,138 @@ flowchart TB
     style DataSources fill:transparent,stroke:#fb923c,stroke-width:1px,stroke-dasharray:5 3,color:#fb923c,font-size:15px
 ```
 
-## UI Preview
+---
 
-These screenshots show the two primary user-facing interfaces of the system.
+## Tech stack
 
-### Landing / First Interface
+| Layer | Pieces |
+|--------|--------|
+| Backend | FastAPI, LangChain / LangGraph orchestration, FAISS + sentence-transformers for chunk embeddings, Groq for LLM, optional Tavily for web snippets |
+| Frontend | Next.js 14 (App Router), TypeScript, Tailwind, Framer Motion |
+| Speech | Web Speech API (STT in the browser), separate HTTP TTS (`/api/tts/synthesize`) |
 
-![First Interface – News Landing](frontend/Frontend_images/First_interface.png)
+Voices and provider behavior: [backend/TTS_OPTIONS.md](backend/TTS_OPTIONS.md).
 
-### Article + AI Agent Interface
+---
 
-![AI Agent Interface – Article with Animated Reporter](frontend/Frontend_images/Agent_interface.png)
-
-## Tech Stack
-
-### Backend
-- **FastAPI**: Async web framework
-- **LangChain + LangGraph**: Multi-agent orchestration
-- **Groq API**: Ultra-fast LLM inference (~200–500 ms typical)
-- **FAISS**: Vector similarity search
-- **sentence-transformers**: Local embeddings
-- **Groq TTS + Edge TTS**: Neural text-to-speech with automatic fallback
-- **newspaper3k**: Article content extraction
-
-### Frontend
-- **Next.js 14**: React framework with App Router
-- **TypeScript**: Type safety
-- **TailwindCSS**: Styling
-- **Framer Motion**: Animations
-- **Web Speech API**: Browser-native STT
-- **Web Audio API**: Audio playback and lip sync
-
-## Setup Instructions
+## Setup
 
 ### Prerequisites
 
-- Python 3.9+
-- Node.js 18+
-- Groq API key ([Get one here](https://console.groq.com))
-- GNews API key (optional, [Get one here](https://gnews.io))
+- Python 3.9 or newer  
+- Node.js 18 or newer  
+- A **Groq API key** (required for chat; [Groq Console](https://console.groq.com))  
+- Optional: GNews, NewsAPI, Guardian, Tavily (see API setup doc)
 
-### Backend Setup
+### Backend
 
-1. Navigate to the backend directory:
 ```bash
 cd backend
-```
-
-2. Create a virtual environment:
-```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
+source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Create a `.env` file from `.env.example`:
-```bash
-cp .env.example .env
-```
+Create `backend/.env` with at least:
 
-5. Edit `.env` and add your API keys:
 ```env
-GROQ_API_KEY=your_groq_api_key_here
-GNEWS_API_KEY=your_gnews_api_key_here  # Optional
+GROQ_API_KEY=your_key_here
 BACKEND_URL=http://localhost:8000
 FRONTEND_URL=http://localhost:3000
 ```
 
-6. Run the backend server:
+If the repo includes `.env.example`, you can copy it. Full key list: [backend/README_API_SETUP.md](backend/README_API_SETUP.md).
+
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The API will be available at `http://localhost:8000`
+API root: `http://localhost:8000` — `GET /health` for a quick check.
 
-### Frontend Setup
+### Frontend
 
-1. Navigate to the frontend directory:
 ```bash
 cd frontend
-```
-
-2. Install dependencies:
-```bash
 npm install
 ```
 
-3. Create a `.env.local` file:
-```bash
-cp .env.example .env.local
-```
+Create `frontend/.env.local`:
 
-4. Edit `.env.local`:
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000
 ```
 
-5. Run the development server:
 ```bash
 npm run dev
 ```
 
-The frontend will be available at `http://localhost:3000`
+App URL: `http://localhost:3000`
+
+---
 
 ## Usage
 
-1. **Browse News**: Navigate through different categories (Hot, AI & Tech, Sports, Geopolitics, Business, Science)
-2. **Read Articles**: Click on any news card to view the full article
-3. **Interact with AI Companion**: 
-   - The AI companion automatically greets you with an article summary
-   - Ask questions via voice (click the microphone button) or text input
-   - The avatar animates and speaks responses
-   - Use the mute button to silence audio while reading
+1. Open the home or category page and choose an article.  
+2. On the article page, read on the left; the companion opens on the right and sends an opening message over the WebSocket.  
+3. Ask follow-ups by typing or using the mic (allow microphone when the browser prompts).  
+4. Mute is available if you want text without playing audio.
 
-## Project Structure
+Suggested prompts appear on the article page; they forward into the companion panel.
+
+---
+
+## Repository layout
 
 ```
 Project ANC/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI entry point
-│   │   ├── config.py            # Configuration
-│   │   ├── routers/             # API routes
-│   │   ├── agents/              # Multi-agent system
-│   │   ├── services/            # Business logic
-│   │   └── models/              # Data models
-│   └── requirements.txt
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── routers/      # REST, WebSocket, TTS
+│   │   ├── agents/       # Reporter and graph
+│   │   ├── services/     # News, RAG, scrape, TTS, etc.
+│   │   └── models/
+│   ├── requirements.txt
+│   └── README_API_SETUP.md
 ├── frontend/
-│   ├── src/
-│   │   ├── app/                 # Next.js pages
-│   │   ├── components/          # React components
-│   │   ├── hooks/               # Custom hooks
-│   │   └── lib/                 # Utilities
-│   └── package.json
+│   └── src/              # app/, components/, hooks/
+├── docs/                 # latency notes, deferred Whisper note
 └── README.md
 ```
 
-## API Endpoints
+---
 
-### News API
-- `GET /api/news?category={category}&page={page}&page_size={size}` - Get news articles
-- `GET /api/news/trending` - Get trending news
-- `GET /api/news/article/{article_id}` - Get full article content
+## API summary
 
-### Chat API
-- `WS /ws/chat/{article_id}` - WebSocket connection for chat
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/news` | Articles by category |
+| GET | `/api/news/trending` | Trending list |
+| GET | `/api/news/article/{article_id}` | Single article (body when available) |
+| WebSocket | `/ws/chat/{article_id}` | Chat for that article |
+| POST | `/api/tts/synthesize` | MP3 speech from text |
 
-### TTS API
-- `POST /api/tts/synthesize` - Synthesize speech from text
- 
-## Latency Budget & Performance Targets
+---
 
-The system was designed with an explicit latency budget to keep the end-to-end voice conversation experience smooth and responsive.
+## Latency and observability
 
-### Latency Budget (Planning Targets)
+End-to-end latency is not fixed: it depends on Groq queue time, article size, embedding work, browser STT, and network conditions. See [docs/latency.md](docs/latency.md) for console metrics (`[latency] …`) and how to reason about server-side time.
 
-| Stage                                      | Target Latency        | Notes |
-|-------------------------------------------|-----------------------|-------|
-| Microphone capture + browser STT (Web Speech API) | **300–700 ms**        | Depends on utterance length and browser; runs fully on the client. |
-| WebSocket transport (client → backend)    | **\<100 ms**          | Local development and typical broadband conditions. |
-| Retrieval + RAG context building          | **200–500 ms**        | FAISS similarity search + chunk selection and formatting. |
-| Groq LLM generation (Llama 3.3 70B)       | **200–500 ms**        | Using Groq’s low-latency inference. |
-| TTS synthesis (Groq TTS / Edge TTS)       | **400–800 ms**        | Includes text cleaning, API call, and audio bytes transfer. |
-| Audio decoding + playback start           | **\<200 ms**          | Web Audio API setup and buffer scheduling. |
-| **End-to-end voice → voice**              | **\<3 seconds total** | Sum of the above under normal conditions. |
+Server-side ASR (e.g. Whisper) is not part of the default stack; rationale and a possible extension path are in [docs/WHISPER_DEFERRED.md](docs/WHISPER_DEFERRED.md).
 
-### Runtime Performance Targets
+---
 
-- **End-to-end latency** (voice input → voice output): **\< 3 seconds**
-- **News cache TTL**: **15 minutes** (to stay fresh without over-hitting free APIs)
-- **FAISS index cache**: **LRU cache, max 100 articles** (recently viewed articles kept hot in memory)
+## Known limitations
 
-## Limitations & Future Improvements
+- Third-party free tiers (news APIs, Groq) may rate-limit; caching reduces but does not eliminate that risk.  
+- Browser STT quality varies by engine and locale; Chromium-based browsers are the most consistent target.  
+- Many publishers block scraping or use paywalls; the UI may show only a snippet while the model still answers within available text.  
+- Reliability in production depends on API keys, quotas, and network path to upstream providers.
 
-- **Current Limitations**:
-  - GNews API has 100 requests/day limit (caching mitigates this)
-  - Web Speech API accuracy varies by browser
-  - Article scraping may fail for some sites
-
-- **Future Enhancements**:
-  - Multi-article conversation support
-  - Multilingual support
-  - Custom avatar customization
-  - Mobile app version
-  - User accounts and saved articles
+---
 
 ## License
 
-This project is proprietary and is offered under the **MIT License**.  
-Copyright (c) 2025 **Mohan Bhosale**. All rights reserved.
-
-See [LICENSE](LICENSE) for the full license text.
-
-## Authors
-
-- Mohan Bhosale
-- Karthikeyan Sugavanan
+Released under the MIT License. See [LICENSE](LICENSE).
