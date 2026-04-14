@@ -27,6 +27,20 @@ Performance focus: minimize time from user send to first assistant text on scree
 
 ---
 
+## Screenshots
+
+Browse categories and trending stories, then open an article. The companion sits beside the reader with voice and text input, suggested prompts, and spoken replies.
+
+### Home & category browsing
+
+![NewsBuddy AI home and category browsing](docs/Al%20News%20Reporter%20frontend%20with%20pictures.png)
+
+### Article view with companion
+
+![Article view with NewsBuddy AI companion panel](docs/trump-news.png)
+
+---
+
 ## Quick start
 
 1. Configure **Setup** below. You need at least a **Groq** API key for chat; speech input is most reliable in **Chrome** or **Edge**.
@@ -111,12 +125,6 @@ flowchart TB
     style InputLayer fill:transparent,stroke:#38bdf8,stroke-width:1px,stroke-dasharray:5 3,color:#38bdf8,font-size:15px
     style DataSources fill:transparent,stroke:#fb923c,stroke-width:1px,stroke-dasharray:5 3,color:#fb923c,font-size:15px
 ```
-
----
-
-## Screenshots
-
-Optional UI captures can live under `frontend/Frontend_images/` (landing and article + companion layout).
 
 ---
 
