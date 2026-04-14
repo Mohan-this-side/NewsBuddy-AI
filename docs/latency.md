@@ -1,26 +1,41 @@
-# Latency measurement (3s target)
+# Latency: what we log and how to read it
 
-This project treats **~3 seconds** end-to-end (user sends a question → first assistant reply text) as a design goal, not a hard SLA. Measurements are **environment-dependent** (Groq load, article length, browser STT).
+This app is built to feel responsive in normal use, but **end-to-end latency is not fixed**. It depends on Groq queue time, article length, embedding work on first open, browser STT, and your network. We treat latency as something to **observe**, not as a hard SLA.
 
-## Backend
+---
 
-- **process_query**: Logged as `chat_latency article_id=… process_query_ms=…` in the WebSocket handler after each user turn (`app/routers/chat.py`). This covers RAG + LLM for that request (not TTS).
+## Backend: request logs
 
-## Frontend
+`main.py` does not add custom timing middleware by default. For REST routes, you can still read uvicorn / logging output for slow handlers if you add your own instrumentation during development. WebSocket chat latency is dominated by the model and streaming inside the WebSocket handler, not a single HTTP round trip.
 
-- After sending a `user_message` over the WebSocket, the client records `performance.now()`.
-- Console lines (dev tools):
-  - `[latency] first_thinking_ms=…` — time until the `thinking` message.
-  - `[latency] first_assistant_text_ms=…` — time until the first `text` message (includes LLM + network; TTS starts after).
+---
 
-## How to benchmark
+## Frontend: time to first assistant text (and thinking)
 
-1. Use **Chrome or Edge** (best Web Speech API behavior per project notes).
-2. Hard-refresh the article page, wait for the greeting to finish, then ask a short question and note `first_assistant_text_ms`.
-3. Repeat across **cold** (first question after load) vs **warm** (second question) to see cache effects on RAG.
-4. Compare with backend `process_query_ms` to separate network/frontend from server work.
+After you send a message (typed or from the mic), the WebSocket hook measures **milliseconds from your send to the first `thinking` or `text` message** from the server and prints:
 
-## Not included in these logs
+```49:49:frontend/src/hooks/useWebSocket.ts
+            console.info(`[latency] first_assistant_text_ms=${elapsed}`);
+```
 
-- **TTS synthesis** (separate HTTP call to `/api/tts`).
-- **Speech-to-text** duration (browser-native); consider Whisper API only if evaluation shows STT as the bottleneck (see `docs/WHISPER_DEFERRED.md`).
+You may also see **`[latency] first_thinking_ms`** from the same hook when the server sends a `thinking` message before full text. Open **DevTools → Console** and look for lines starting with **`[latency]`**. That is the practical “felt latency” for the assistant stream, excluding optional audio playback.
+
+---
+
+## How to compare backend vs browser
+
+If you need a rough split:
+
+1. Note **`[latency] first_assistant_text_ms`** in the console.  
+2. On the server, look at logs around the same time for Groq or handler duration if you add temporary timing in development (we do not ship a separate “LLM-only ms” field in the UI).  
+3. Heavy RAG or long articles can add work on the first message for a session; later messages often reuse the same retrieval context.
+
+---
+
+## What we are not promising
+
+- A maximum response time under load.  
+- Identical latency across Groq model versions or API regions.  
+- STT latency from **Web Speech API**: it is implemented by the browser/OS vendor, not by our server.
+
+Use the metrics above to describe performance honestly in demos or reports.
